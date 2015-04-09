@@ -1,0 +1,15 @@
+.eunit
+*~
+*.swp
+seen.dets
+ebin
+deps
+erl_crash.dump
+priv/aws_credentials.term
+tmp/
+*.log*
+*#
+.#*
+.edts
+tags
+.deps_plt
