@@ -8,21 +8,29 @@ reading files from S3. It processes them by reading relevant meta data from
 DynamoDB and writes an annotated result to S3.
 
 Tasks are controlled by a state machine depicted in the following picture.
-       
-      find tasks 
-          |
-          |
-          v 
-   .-->[Pending]---.
-   |               |
-worker           spawn
-failed           worker
-   |               |
-   .---[Running]<--.
-          |
-          |
-          v
-       finished 
+
+```       
+  execute({Mod, Fun, Args}) 
+             |
+             |
+             v 
+    .--->[ Pending ]---.
+    |                  |
+node down         spawn worker
+    |                  |
+    `---[ Running ]<---'-----------.
+        |         |                 |
+        |     exception           retry
+        |         |                 |
+        |         `--->[ Failed ]---'
+     success               |
+        |         max retries exceeded
+        |                  |
+        |                  v
+        |         {error, failed_max_retries_times}
+        v
+{ok, Result = apply(Mod, Fun, Args)}       
+```
 
 Only the states Pending and Running are represented inside the scheduler.
 External events such as files being written to S3 trigger the implicit starting
