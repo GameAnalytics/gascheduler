@@ -7,12 +7,12 @@
 %% API
 -export([start_link/4,
          execute/1,
-         worker_nodes/0,
-         add_worker_node/1]).
+         add_worker_node/1,
+         stats/0]).
 
 %% For workers
--export([notify_done/3,
-         notify_failed/3]).
+-export([notify_client/4,
+         worker_fun/3]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -30,6 +30,13 @@
 -type client() :: pid().
 -type pending() :: queue:queue(mfa()).
 -type running() :: [{pid(), mfa()}].
+-type stats_integer() :: {ticks | pending | running | worker_node_count 
+                          | max_workers | max_retries, non_neg_integer()}.
+-type stats_nodes() :: {worker_nodes, {node(), Running::non_neg_integer()}}.
+-type stats() :: [stats_integer() | stats_nodes()].
+
+%% The result of executing a worker which is also passed to the client.
+-type result() :: {ok | error, any()}.
 
 -record(state, {%% a set of all nodes that can run workers
                 nodes :: worker_nodes(),
@@ -49,7 +56,10 @@
                 
                 %% tasks currently running
                 %% mfa is needed to restart failed processes
-                running :: running()}).
+                running :: running(),
+                
+                %% the number of times the scheduler has been run
+                ticks :: non_neg_integer()}).
 
 %%% API
 
@@ -63,23 +73,19 @@ start_link(Nodes, Client, MaxWorkers, MaxRetries) ->
 execute(MFA) ->
     gen_server:call(?MODULE, {execute, MFA}).
 
--spec worker_nodes() -> worker_nodes().
-worker_nodes() ->
-    gen_server:call(?MODULE, worker_nodes).
-
 -spec add_worker_node(node()) -> ok | node_not_found.
 add_worker_node(Node) ->
     gen_server:call(?MODULE, {add_worker_node, Node}).
 
+-spec stats() -> stats().
+stats() ->
+  gen_server:call(?MODULE, stats).
+
 %%% For workers
 
--spec notify_done(pid(), pid(), mfa()) -> ok.
-notify_done(Scheduler, Worker, MFA) ->
-    gen_server:cast(Scheduler, {done, Worker, MFA}).
-
--spec notify_failed(pid(), pid(), mfa()) -> ok.
-notify_failed(Scheduler, Worker, MFA) ->
-    gen_server:cast(Scheduler, {failed, Worker, MFA}).
+-spec notify_client(pid(), result(), pid(), mfa()) -> ok.
+notify_client(Scheduler, Result, Worker, MFA) ->
+    gen_server:cast(Scheduler, {Result, Worker, MFA}).
 
 %%% gen_server callbacks
 
@@ -95,7 +101,8 @@ init([Nodes, Client, MaxWorkers, MaxRetries]) ->
                 max_workers = MaxWorkers,
                 max_retries = MaxRetries,
                 pending = queue:new(),
-                running = []}}.
+                running = [],
+                ticks = 0}}.
 
 handle_call({execute, MFA}, _From, State) ->
     {reply, ok, execute_try(MFA, State)};
@@ -111,33 +118,38 @@ handle_call({add_worker_node, Node}, _From, State = #state{nodes = Nodes}) ->
                         end,
     {reply, Reply, State#state{nodes = NewNodes}};
 
-handle_call(worker_nodes, _From, State = #state{nodes = Nodes}) ->
-    {reply, Nodes, State};
+handle_call(stats, _From, State = #state{nodes = Nodes,
+                                         pending = Pending,
+                                         running = Running,
+                                         max_workers = MaxWorkers,
+                                         max_retries = MaxRetries,
+                                         ticks = Ticks}) ->
+    Reply = [{ticks, Ticks},
+             {pending, queue:len(Pending)},
+             {running, length(Running)},
+             {worker_node_count, length(Nodes)},
+             {max_workers, MaxWorkers},
+             {max_retries, MaxRetries},
+             {worker_nodes, sort_nodes(Running, Nodes)}],
+    {reply, Reply, State};
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
 %% A tick is sent when one or more tasks are removed from the running queue.
-handle_cast(tick, State) ->
-    {noreply, pending_to_running(State)};
+handle_cast(tick, State = #state{ticks = Ticks}) ->
+    NewState = pending_to_running(State),
+    {noreply, NewState#state{ticks = Ticks + 1}};
 
-handle_cast({done, Worker, MFA}, State = #state{running = Running,
-                                                 client = Client}) ->
-    error_logger:info_msg("Worker ~p (pid = ~p) done", [Worker, MFA]),
-    ok = gen_server:cast(Client, {done, MFA}),
-    {noreply, State#state{running = remove_worker(Worker, Running)}};
-
-handle_cast({failed, Worker, MFA}, State = #state{running = Running,
-                                                   client = Client}) ->
-    error_logger:warning_msg("sheduler: worker ~p (pid = ~p) failed permanently",
-                             [Worker, MFA]),
-    ok = gen_server:cast(Client, {failed, MFA}),
+handle_cast({Result, Worker, MFA}, State = #state{running = Running,
+                                                  client = Client}) ->
+    Client ! {Result, node(Worker), MFA},
     {noreply, State#state{running = remove_worker(Worker, Running)}};
 
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-% pre: notify_done/3 was called 
+% pre: notify_client/3 was called 
 handle_info({'EXIT', _Worker, normal}, State) ->
     {noreply, State};
 
@@ -151,19 +163,19 @@ handle_info({'EXIT', Worker, _Reason}, State = #state{pending = Pending,
                           running = remove_worker(Worker, Running)}};
 
 handle_info({nodedown, NodeDown}, State = #state{nodes = Nodes}) ->
-    error_logger:info_msg("scheduler: removing node ~p because it seems to be down",
-                          [NodeDown]),
+    error_logger:warning_msg("scheduler: removing node ~p because it is down",
+                             [NodeDown]),
     {noreply, State#state{nodes = lists:delete(NodeDown, Nodes)}};
 
 handle_info(Info, State) ->
-    error_logger:info_msg("scheduler: unexpected message ~p", [Info]),
+    error_logger:warning_msg("scheduler: unexpected message ~p", [Info]),
     {noreply, State}.
 
 
 terminate(Reason, #state{running = Running, pending = Pending} = _State) ->
-    error_logger:error_msg("scheduler: terminating with reason ~p and "
-                           "~p running tasks and ~p pending tasks",
-                           [Reason, length(Running), queue:len(Pending)]),
+    error_logger:warning_msg("scheduler: terminating with reason ~p and "
+                             "~p running tasks and ~p pending tasks",
+                             [Reason, length(Running), queue:len(Pending)]),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -193,7 +205,7 @@ get_free_node(Nodes, MaxWorkers, Running) ->
 %% Sort nodes according to the number of workers they have, in ascending order
 -spec sort_nodes(running(), worker_nodes()) -> [{node(), non_neg_integer()}].
 sort_nodes(Running, Nodes) ->
-    AccFun = fun (Pid, Acc) ->
+    AccFun = fun ({Pid, _MFA}, Acc) ->
                  Node = ?MODULE:get_node(Pid),
                  Sum = proplists:get_value(Node, Acc, 0),
                  lists:keystore(Node, 1, Acc, {Node, Sum+1})
@@ -221,16 +233,23 @@ ping_nodes(Nodes) ->
 
 
 %% Executes MFA MaxRetries times
--spec execute_do(mfa(), non_neg_integer()) -> done | failed.
+-spec execute_do(mfa(), non_neg_integer()) -> result().
 execute_do(_MFA, 0) ->
-    failed;
+    {error, failed_max_retries_times};
 execute_do(MFA = {Mod, Fun, Args}, MaxRetries) ->
     try
-        _ = apply(Mod, Fun, Args),
-        done 
-    catch _ ->
+        {ok, apply(Mod, Fun, Args)}
+    catch _:_ ->
         execute_do(MFA, MaxRetries - 1)
     end.
+
+
+-spec worker_fun(pid(), mfa(), max_retries()) -> ok.
+worker_fun(Scheduler, MFA, MaxRetries) ->
+    Worker = self(),
+    Result = execute_do(MFA, MaxRetries),
+    gascheduler:notify_client(Scheduler, Result, Worker, MFA).
+    
 
 %% Tries to execute MFA, otherwise queues MFA in pending.
 -spec execute_try(mfa(), #state{}) -> #state{}. 
@@ -240,16 +259,11 @@ execute_try(MFA, State = #state{nodes = Nodes,
                                 max_workers = MaxWorkers,
                                 max_retries = MaxRetries}) ->
     Scheduler = self(),
-    WorkerFun = fun() ->
-                    Worker = self(),
-                    case execute_do(MFA, MaxRetries) of
-                        done -> gascheduler:notify_done(Scheduler, Worker, MFA);
-                        failed -> gascheduler:notify_failed(Scheduler, Worker, MFA)
-                    end
-                end,
     case get_free_node(Nodes, MaxWorkers, Running) of
         undefined -> State#state{pending = queue:in(MFA, Pending)};
-        Node -> State#state{running = [{spawn_link(Node, WorkerFun), MFA} | Running]}
+        Node -> Args = [Scheduler, MFA, MaxRetries],
+                WorkerPid = spawn_link(Node, ?MODULE, worker_fun, Args),
+                State#state{running = [{WorkerPid, MFA} | Running]}
     end.
 
 
@@ -265,6 +279,8 @@ pending_to_running(State = #state{pending = Pending,
     {Execute, KeepPending} =
         case FreeWorkers > queue:len(Pending) of
             true -> {Pending, queue:new()};
+            %% TODO(cdevries): work out if this is a performance bottleneck
+            %%                 because it is O(n)
             false -> queue:split(FreeWorkers, Pending)
         end,    
     Fun = fun(MFA, AccState) ->
