@@ -1,4 +1,4 @@
-%% This module schedules tasks on 1 or more compute nodes in a cluster. 
+%% This module schedules tasks on 1 or more compute nodes in a cluster.
 %% It assumes there is only 1 client creating tasks to be executed.
 -module(gascheduler).
 
@@ -6,6 +6,7 @@
 
 %% API
 -export([start_link/4,
+         stop/0,
          execute/1,
          add_worker_node/1,
          stats/0]).
@@ -22,7 +23,9 @@
          terminate/2,
          code_change/3]).
 
--export([get_node/1]).
+%% For testing
+-export([get_node/1,
+         pending_to_running/1]).
 
 -type worker_nodes() :: [node()].
 -type max_workers() :: non_neg_integer().
@@ -30,7 +33,7 @@
 -type client() :: pid().
 -type pending() :: queue:queue(mfa()).
 -type running() :: [{pid(), mfa()}].
--type stats_integer() :: {ticks | pending | running | worker_node_count 
+-type stats_integer() :: {ticks | pending | running | worker_node_count
                           | max_workers | max_retries, non_neg_integer()}.
 -type stats_nodes() :: {worker_nodes, {node(), Running::non_neg_integer()}}.
 -type stats() :: [stats_integer() | stats_nodes()].
@@ -40,24 +43,24 @@
 
 -record(state, {%% a set of all nodes that can run workers
                 nodes :: worker_nodes(),
-                
+
                 %% maximum workers on an individual node
                 max_workers :: max_workers(),
 
                 %% how many times to restart a worker before giving up
                 max_retries :: max_retries(),
-                
+
                 %% the process that generates tasks and receives status
                 %% messages from the scheduler
-                client :: client(),                                 
-                
+                client :: client(),
+
                 %% pending tasks to be run
                 pending :: pending(),
-                
+
                 %% tasks currently running
                 %% mfa is needed to restart failed processes
                 running :: running(),
-                
+
                 %% the number of times the scheduler has been run
                 ticks :: non_neg_integer()}).
 
@@ -68,6 +71,10 @@
 start_link(Nodes, Client, MaxWorkers, MaxRetries) ->
     gen_server:start_link({local, ?MODULE}, ?MODULE,
                            [Nodes, Client, MaxWorkers, MaxRetries], []).
+
+-spec stop() -> ok.
+stop() ->
+    gen_server:call(?MODULE, stop).
 
 -spec execute(mfa()) -> ok.
 execute(MFA) ->
@@ -113,7 +120,7 @@ handle_call({add_worker_node, Node}, _From, State = #state{nodes = Nodes}) ->
                                 case lists:member(Node, Nodes) of
                                     true -> {ok, Nodes};
                                     false -> {ok, [Node | Nodes]}
-                                end;    
+                                end;
                             _    -> {node_not_found, Nodes}
                         end,
     {reply, Reply, State#state{nodes = NewNodes}};
@@ -133,12 +140,19 @@ handle_call(stats, _From, State = #state{nodes = Nodes,
              {worker_nodes, sort_nodes(Running, Nodes)}],
     {reply, Reply, State};
 
+handle_call(stop, _From, State) ->
+    %% TODO(cdevries): kill workers
+    {stop, normal, ok, State};
+
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
 %% A tick is sent when one or more tasks are removed from the running queue.
-handle_cast(tick, State = #state{ticks = Ticks}) ->
-    NewState = pending_to_running(State),
+handle_cast(tick, State = #state{ticks = Ticks, pending = Pending}) ->
+    NewState = case queue:is_empty(Pending) of
+                   true -> State;
+                   false -> ?MODULE:pending_to_running(State)
+               end,
     {noreply, NewState#state{ticks = Ticks + 1}};
 
 handle_cast({Result, Worker, MFA}, State = #state{running = Running,
@@ -149,7 +163,7 @@ handle_cast({Result, Worker, MFA}, State = #state{running = Running,
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-% pre: notify_client/3 was called 
+% pre: notify_client/3 was called
 handle_info({'EXIT', _Worker, normal}, State) ->
     {noreply, State};
 
@@ -249,10 +263,10 @@ worker_fun(Scheduler, MFA, MaxRetries) ->
     Worker = self(),
     Result = execute_do(MFA, MaxRetries),
     gascheduler:notify_client(Scheduler, Result, Worker, MFA).
-    
+
 
 %% Tries to execute MFA, otherwise queues MFA in pending.
--spec execute_try(mfa(), #state{}) -> #state{}. 
+-spec execute_try(mfa(), #state{}) -> #state{}.
 execute_try(MFA, State = #state{nodes = Nodes,
                                 pending = Pending,
                                 running = Running,
@@ -279,10 +293,8 @@ pending_to_running(State = #state{pending = Pending,
     {Execute, KeepPending} =
         case FreeWorkers > queue:len(Pending) of
             true -> {Pending, queue:new()};
-            %% TODO(cdevries): work out if this is a performance bottleneck
-            %%                 because it is O(n)
             false -> queue:split(FreeWorkers, Pending)
-        end,    
+        end,
     Fun = fun(MFA, AccState) ->
               execute_try(MFA, AccState)
           end,
@@ -290,7 +302,7 @@ pending_to_running(State = #state{pending = Pending,
 
 %% Remove a Worker from Running and send a scheduling tick because slots are
 %% free in the run queue.
--spec remove_worker(pid(), running()) -> running(). 
+-spec remove_worker(pid(), running()) -> running().
 remove_worker(Worker, Running) ->
     ok = gen_server:cast(?MODULE, tick),
     lists:keydelete(Worker, 1, Running).
