@@ -249,7 +249,7 @@ ping_nodes(Nodes) ->
 %% Executes MFA MaxRetries times
 -spec execute_do(mfa(), non_neg_integer()) -> result().
 execute_do(_MFA, 0) ->
-    {error, failed_max_retries_times};
+    {error, {?MODULE, max_retries}};
 execute_do(MFA = {Mod, Fun, Args}, MaxRetries) ->
     try
         {ok, apply(Mod, Fun, Args)}
