@@ -82,6 +82,9 @@ execute(MFA) ->
 
 -spec add_worker_node(node()) -> ok | node_not_found.
 add_worker_node(Node) ->
+    %% If all worker nodes were down then a tick needs to be sent to restart
+    %% scheduling of pending tasks.
+    ok = gen_server:cast(?MODULE, tick),
     gen_server:call(?MODULE, {add_worker_node, Node}).
 
 -spec stats() -> stats().
