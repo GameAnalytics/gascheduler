@@ -3,6 +3,7 @@
 -include_lib("eunit/include/eunit.hrl").
 
 -export([sleep_100/1,
+         sleep_1000/1,
          fail/0,
          kill_if/1]).
 
@@ -11,11 +12,11 @@ gascheduler_test_() ->
      fun setup/0,
      fun teardown/1,
      [
-      %%{timeout, 10, ?_test(execute_tasks())},
-      %%{timeout, 60, ?_test(max_workers())},
-      %%{timeout, 10, ?_test(max_retries())},
-      %%{timeout, 10, ?_test(node_down())},
-      {timeout, 10, ?_test(all_nodes_down())}
+      {spawn, {timeout, 10, ?_test(execute_tasks())}},
+      {spawn, {timeout, 60, ?_test(max_workers())}},
+      {spawn, {timeout, 10, ?_test(max_retries())}},
+      {spawn, {timeout, 10, ?_test(all_nodes_down())}},
+      {spawn, {timeout, 10, ?_test(node_down())}}
     ]}.
 
 %%
@@ -32,6 +33,11 @@ setup() ->
     ok.
 
 
+teardown(_) ->
+    _ = net_kernel:stop(),
+    ok.
+
+
 setup_slaves(Num) ->
     setup_slaves(1, Num).
 
@@ -44,20 +50,48 @@ setup_slaves(Begin, End) ->
     Slaves.
 
 
-kill_slaves(Slaves) ->
-    lists:foreach(fun slave:stop/1, Slaves).
-
-
-teardown(_) ->
-    _ = net_kernel:stop(),
-    ok.
-
 %%
 %% Utilities
 %%
 
+kill_slaves(Slaves) ->
+    lists:foreach(fun(Slave) -> ok = slave:stop(Slave) end, Slaves).
+
+
+receive_nodeatom(Atom, Nodes) ->
+    error_logger:info_msg("waiting for: ~p from ~p", [Atom, Nodes]),
+    Result = lists:foreach(
+        fun(_) ->
+            receive
+                {Atom, Node} ->
+                    case lists:member(Node, Nodes) of
+                        true -> error_logger:info_msg("received ~p from ~p",
+                                                      [Atom, Node]);
+                        false -> error_logger:error_msg(
+                                     "received ~p from UNKNOWN node ~p",
+                                     [Atom, Node])
+                    end
+            end
+        end, Nodes),
+    error_logger:info_msg("waiting for ~p SUCCESS", [Atom]),
+    Result.
+
+
+receive_nodeup(Nodes) ->
+    receive_nodeatom(nodeup, Nodes).
+
+
+receive_nodedown(Nodes) ->
+    receive_nodeatom(nodedown, Nodes).
+
+
 sleep_100(Id) ->
    timer:sleep(100),
+   Id.
+
+
+sleep_1000(Id) ->
+   timer:sleep(1000),
    Id.
 
 
@@ -88,16 +122,25 @@ test_tasks(NumTasks, Nodes) ->
                     ?assertEqual(sleep_100, Fun),
                     ?assertEqual(length(Args), 1),
                     ?assertEqual(hd(Args), Id),
+                    ?assert(lists:member(Node, Nodes)),
+                    ?assert(lists:member(Id, Tasks)),
                     {Id, Node};
-                _ ->
+                Msg ->
+                    error_logger:error_msg("unexpected message: ~p", [Msg]),
                     ?assert(false),
-                    {-1, no_node}
+                    {-1, fail}
             end
          end, Tasks),
-    {ReceivedIds, ReceivedNodes} = lists:unzip(Received),
-    ?assertEqual(lists:usort(Nodes), lists:usort(ReceivedNodes)),
-    ?assertEqual(lists:sort(ReceivedIds), Tasks).
 
+    {ReceivedTasks, ReceivedNodes} = lists:unzip(Received),
+
+    %% Ensure all tasks were completed.
+    ?assertEqual(lists:usort(ReceivedTasks), Tasks),
+
+    %% Ensure we used all compute nodes.
+    ?assertEqual(lists:usort(ReceivedNodes), lists:usort(Nodes)),
+
+    ok.
 
 %% Sort nodes according to the number of workers they have, in ascending order
 sort_nodes(Running, Nodes) ->
@@ -120,6 +163,7 @@ check_nodes(Running, Nodes, MaxWorkers) ->
         sort_nodes(Running, Nodes)),
     ok.
 
+
 %%
 %% Tests
 %%
@@ -130,7 +174,10 @@ check_nodes(Running, Nodes, MaxWorkers) ->
 %% assert that work is finished
 %% assert all stats are updated
 execute_tasks() ->
-    Nodes = [MasterNode, SlaveNode] = [get_master() | setup_slaves(1)],
+    ok = net_kernel:monitor_nodes(true),
+    Slaves = setup_slaves(1),
+    receive_nodeup(Slaves),
+    Nodes = [MasterNode, SlaveNode] = [get_master() | Slaves],
     MaxWorkers = 10,
     MaxRetries = 10,
     Client = self(),
@@ -150,17 +197,22 @@ execute_tasks() ->
                                                             {SlaveNode, 0}]),
 
     gascheduler:stop(),
-    kill_slaves(tl(Nodes)),
+    kill_slaves(Slaves),
+    receive_nodedown(Slaves),
 
     ok.
+
 
 %% Start 10 nodes
 %% Start the scheduler
 %% Run 5000 tasks
 %% Intercept calls to ensure max workers is not violated
 max_workers() ->
+    ok = net_kernel:monitor_nodes(true),
     NumNodes = 10,
-    Nodes = [get_master() | setup_slaves(NumNodes - 1)],
+    Slaves = setup_slaves(NumNodes - 1),
+    receive_nodeup(Slaves),
+    Nodes = [get_master() | Slaves],
     MaxWorkers = 10,
     MaxRetries = 10,
     Client = self(),
@@ -181,18 +233,23 @@ max_workers() ->
     test_tasks(NumTasks, Nodes),
 
     gascheduler:stop(),
-    kill_slaves(tl(Nodes)),
+    kill_slaves(Slaves),
+    receive_nodedown(Slaves),
 
     ok = meck:unload(gascheduler),
     ok.
+
 
 %% Start 10 nodes
 %% Start the scheduler
 %% Run 100 tasks who fail 10 times causing permanent failure
 %% Ensure client is notified 100 times
 max_retries() ->
+    ok = net_kernel:monitor_nodes(true),
     NumNodes = 10,
-    Nodes = [get_master() | setup_slaves(NumNodes - 1)],
+    Slaves = setup_slaves(NumNodes - 1),
+    receive_nodeup(Slaves),
+    Nodes = [get_master() | Slaves],
     MaxWorkers = 10,
     MaxRetries = 10,
     NumTasks = 100,
@@ -212,57 +269,16 @@ max_retries() ->
                 {{error, {gascheduler, max_retries}}, _Node, {Mod, Fun, Args}} ->
                     ?assertEqual(gascheduler_test, Mod),
                     ?assertEqual(fail, Fun),
-                    ?assertEqual(length(Args), 0)
+                    ?assertEqual(length(Args), 0);
+                Msg ->
+                    error_logger:error_msg("unexpected message: ~p", [Msg]),
+                    ?assert(false)
             end
          end, Tasks),
 
     gascheduler:stop(),
-    kill_slaves(tl(Nodes)),
-
-    ok.
-
-%% Start 3 nodes
-%% Start the scheduler
-%% The first task that runs on node 1 kills node 1
-%% Ensure this task is scheduled on another node
-node_down() ->
-    NumNodes = 3,
-    Nodes = [_Master, Slave1, _Slave2]
-          = [get_master() | setup_slaves(NumNodes - 1)],
-    MaxWorkers = 10,
-    MaxRetries = 10,
-    NumTasks = 100,
-    Client = self(),
-
-    {ok, _} = gascheduler:start_link(Nodes, Client, MaxWorkers, MaxRetries),
-
-    net_kernel:monitor_nodes(true),
-
-    Tasks = lists:seq(1, NumTasks),
-    ok = lists:foreach(
-        fun(_) ->
-            ok = gascheduler:execute({gascheduler_test, kill_if, [Slave1]})
-        end, Tasks),
-
-    receive
-        {nodedown, Node} -> ?assertEqual(Node, Slave1)
-    end,
-
-    %% This will only succeed if we receive 100 successes.
-    lists:foreach(
-        fun(_) ->
-            receive
-                {{ok, ok}, ReceivedNode, {Mod, Fun, Args}} ->
-                    ?assertEqual(gascheduler_test, Mod),
-                    ?assertEqual(kill_if, Fun),
-                    ?assertEqual(length(Args), 1),
-                    ?assertEqual(hd(Args), Slave1),
-                    ?assertNotEqual(ReceivedNode, Slave1)
-            end
-         end, Tasks),
-
-    gascheduler:stop(),
-    kill_slaves(tl(Nodes)),
+    kill_slaves(Slaves),
+    receive_nodedown(Slaves),
 
     ok.
 
@@ -273,59 +289,104 @@ node_down() ->
 %% Add worker nodes
 %% Ensure all tasks complete
 all_nodes_down() ->
+    ok = net_kernel:monitor_nodes(true),
     NumNodes = 10,
-    Nodes = setup_slaves(NumNodes),
     MaxWorkers = 10,
     MaxRetries = 10,
     NumTasks = 100,
     Client = self(),
 
-    {ok, _} = gascheduler:start_link(Nodes, Client, MaxWorkers, MaxRetries),
+    Nodes = setup_slaves(NumNodes),
+    receive_nodeup(Nodes),
 
-    net_kernel:monitor_nodes(true),
+    {ok, _} = gascheduler:start_link(Nodes, Client, MaxWorkers, MaxRetries),
 
     Tasks = lists:seq(1, NumTasks),
     lists:foreach(
         fun(Id) ->
-            ok = gascheduler:execute({gascheduler_test, sleep_100, [Id]})
+            ok = gascheduler:execute({gascheduler_test, sleep_1000, [Id]})
         end, Tasks),
 
     kill_slaves(Nodes),
-
-    lists:foreach(
-        fun(_) ->
-            receive
-                {nodedown, Node} -> ?assert(lists:member(Node, Nodes))
-            end
-        end, Nodes),
+    receive_nodedown(Nodes),
 
     NewNodes = setup_slaves(11, 20),
+    receive_nodeup(NewNodes),
     lists:foreach(fun gascheduler:add_worker_node/1, NewNodes),
-    lists:foreach(
-        fun(_) ->
-            receive
-                {nodeup, Node} -> ?assert(lists:member(Node, NewNodes))
-            end
-        end, NewNodes),
 
     Received = lists:map(
         fun(_) ->
             receive
                 {{ok, Id}, Node, {Mod, Fun, Args}} ->
                     ?assertEqual(gascheduler_test, Mod),
-                    ?assertEqual(sleep_100, Fun),
+                    ?assertEqual(sleep_1000, Fun),
                     ?assertEqual(length(Args), 1),
                     ?assertEqual(hd(Args), Id),
-                    {Id, Node};
-                _ ->
+                    ?assert(lists:member(Node, NewNodes)),
+                    ?assert(lists:member(Id, Tasks)),
+                    Id;
+                Msg ->
+                    error_logger:error_msg("unexpected message: ~p", [Msg]),
+                    ?assert(false),
+                    -1
+            end
+         end, Tasks),
+
+    %% Ensure all tasks were completed. While we received 100 ok messages above
+    %% we could have received a particular task twice.
+    ?assertEqual(lists:usort(Received), Tasks),
+
+    gascheduler:stop(),
+    kill_slaves(NewNodes),
+    receive_nodedown(NewNodes),
+
+    ok.
+
+
+%% Start 3 nodes
+%% Start the scheduler
+%% The first task that runs on node 1 kills node 1
+%% Ensure this task is scheduled on another node
+node_down() ->
+    ok = net_kernel:monitor_nodes(true),
+    NumNodes = 3,
+    MaxWorkers = 10,
+    MaxRetries = 10,
+    NumTasks = 100,
+    Client = self(),
+
+    Slaves = setup_slaves(NumNodes - 1),
+    Nodes = [_Master, Slave1, Slave2]
+          = [get_master() | Slaves],
+    receive_nodeup(Slaves),
+
+    {ok, _} = gascheduler:start_link(Nodes, Client, MaxWorkers, MaxRetries),
+
+    Tasks = lists:seq(1, NumTasks),
+    ok = lists:foreach(
+        fun(_) ->
+            ok = gascheduler:execute({gascheduler_test, kill_if, [Slave1]})
+        end, Tasks),
+    receive_nodedown([Slave1]),
+
+    %% This will only succeed if we receive 100 successes.
+    lists:foreach(
+        fun(_) ->
+            receive
+                {{ok, ok}, ReceivedNode, {Mod, Fun, Args}} ->
+                    ?assertEqual(gascheduler_test, Mod),
+                    ?assertEqual(kill_if, Fun),
+                    ?assertEqual(length(Args), 1),
+                    ?assertEqual(hd(Args), Slave1),
+                    ?assertNotEqual(ReceivedNode, Slave1);
+                Msg ->
+                    error_logger:error_msg("unexpected message: ~p", [Msg]),
                     ?assert(false)
             end
          end, Tasks),
-    {ReceivedIds, ReceivedNodes} = lists:unzip(Received),
-    ?assertEqual(lists:usort(NewNodes), lists:usort(ReceivedNodes)),
-    ?assertEqual(lists:sort(ReceivedIds), Tasks),
 
     gascheduler:stop(),
-    kill_slaves(tl(Nodes)),
+    kill_slaves([Slave2]),
+    receive_nodedown([Slave2]),
 
     ok.
