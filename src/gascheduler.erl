@@ -182,6 +182,9 @@ handle_info({'EXIT', Worker, _Reason}, State = #state{pending = Pending,
 handle_info({nodedown, NodeDown}, State = #state{nodes = Nodes}) ->
     error_logger:warning_msg("scheduler: removing node ~p because it is down",
                              [NodeDown]),
+    %% Note that nodedown messages for nodes can appear before EXIT messages
+    %% from workers. Therefore, we can have a state where there are tasks still
+    %% in the running queue but no nodes in the nodes list.
     {noreply, State#state{nodes = lists:delete(NodeDown, Nodes)}};
 
 handle_info(Info, State) ->
@@ -291,13 +294,17 @@ pending_to_running(State = #state{pending = Pending,
                                   max_workers = MaxWorkers,
                                   nodes = Nodes}) ->
     %% The execute_try will succeed each time because we first calculate the
-    %% number of free slots.
-    FreeWorkers = (MaxWorkers * length(Nodes)) - length(Running),
-    {Execute, KeepPending} =
-        case FreeWorkers > queue:len(Pending) of
-            true -> {Pending, queue:new()};
-            false -> queue:split(FreeWorkers, Pending)
-        end,
+    %% number of available slots.
+    AvailableSlots = (MaxWorkers * length(Nodes)) - length(Running),
+    %% see handle_cast({nodedown... for why this can be negative
+    FreeWorkers = case AvailableSlots < 0 of
+                      true -> 0;
+                      false -> AvailableSlots
+                  end,
+    {Execute, KeepPending} = case FreeWorkers > queue:len(Pending) of
+                                 true -> {Pending, queue:new()};
+                                 false -> queue:split(FreeWorkers, Pending)
+                             end,
     Fun = fun(MFA, AccState) ->
               execute_try(MFA, AccState)
           end,
