@@ -299,10 +299,12 @@ execute_try(MFA, State = #state{nodes = Nodes,
                                 max_retries = MaxRetries}) ->
     Scheduler = self(),
     case get_free_node(Nodes, MaxWorkers, Running) of
-        undefined -> State#state{pending = queue:in(MFA, Pending)};
-        Node -> Args = [Scheduler, MFA, MaxRetries],
-                WorkerPid = spawn_link(Node, ?MODULE, worker_fun, Args),
-                State#state{running = [{WorkerPid, MFA} | Running]}
+        undefined ->
+            State#state{pending = queue:in(MFA, Pending)};
+        Node ->
+            Args = [Scheduler, MFA, MaxRetries],
+            WorkerPid = spawn_link(Node, ?MODULE, worker_fun, Args),
+            State#state{running = [{WorkerPid, MFA} | Running]}
     end.
 
 
