@@ -170,7 +170,7 @@ handle_cast(tick, State = #state{ticks = Ticks, pending = Pending}) ->
 
 handle_cast({Result, Worker, MFA}, State = #state{running = Running,
                                                   client = Client}) ->
-    Client ! {Result, node(Worker), MFA},
+    Client ! {gascheduler, Result, node(Worker), MFA},
     {noreply, State#state{running = remove_worker(Worker, Running)}};
 
 handle_cast(_Msg, State) ->
