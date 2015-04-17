@@ -118,7 +118,7 @@ test_tasks(NumTasks, Nodes) ->
     Received = lists:map(
         fun(_) ->
             receive
-                {{ok, Id}, Node, {Mod, Fun, Args}} ->
+                {gascheduler, {ok, Id}, Node, {Mod, Fun, Args}} ->
                     ?assertEqual(gascheduler_test, Mod),
                     ?assertEqual(sleep_100, Fun),
                     ?assertEqual(length(Args), 1),
@@ -267,7 +267,7 @@ max_retries() ->
     lists:foreach(
         fun(_) ->
             receive
-                {{error, {gascheduler, max_retries}}, _Node, {Mod, Fun, Args}} ->
+                {gascheduler, {error, {gascheduler, max_retries}}, _Node, {Mod, Fun, Args}} ->
                     ?assertEqual(gascheduler_test, Mod),
                     ?assertEqual(fail, Fun),
                     ?assertEqual(length(Args), 0);
@@ -319,7 +319,7 @@ all_nodes_down() ->
     Received = lists:map(
         fun(_) ->
             receive
-                {{ok, Id}, Node, {Mod, Fun, Args}} ->
+                {gascheduler, {ok, Id}, Node, {Mod, Fun, Args}} ->
                     ?assertEqual(gascheduler_test, Mod),
                     ?assertEqual(sleep_1000, Fun),
                     ?assertEqual(length(Args), 1),
@@ -375,7 +375,7 @@ node_down() ->
     lists:foreach(
         fun(_) ->
             receive
-                {{ok, ok}, ReceivedNode, {Mod, Fun, Args}} ->
+                {gascheduler, {ok, ok}, ReceivedNode, {Mod, Fun, Args}} ->
                     ?assertEqual(gascheduler_test, Mod),
                     ?assertEqual(kill_if, Fun),
                     ?assertEqual(length(Args), 1),
@@ -424,7 +424,7 @@ unfinished() ->
     lists:foreach(
         fun(_) ->
             receive
-                {{ok, _Id}, _Node, {Mod, Fun, _Args}} ->
+                {gascheduler, {ok, _Id}, _Node, {Mod, Fun, _Args}} ->
                     ?assertEqual(gascheduler_test, Mod),
                     ?assertEqual(sleep_1000, Fun);
                 Msg ->
