@@ -24,8 +24,7 @@
          code_change/3]).
 
 %% For testing
--export([get_node/1,
-         pending_to_running/1]).
+-export([pending_to_running/1]).
 
 -type worker_nodes() :: [node()].
 -type max_workers() :: non_neg_integer().
@@ -226,19 +225,15 @@ get_free_node(Nodes, MaxWorkers, Running) ->
 -spec sort_nodes(running(), worker_nodes()) -> [{node(), non_neg_integer()}].
 sort_nodes(Running, Nodes) ->
     AccFun = fun ({Pid, _MFA}, Acc) ->
-                 Node = ?MODULE:get_node(Pid),
-                 Sum = proplists:get_value(Node, Acc, 0),
-                 lists:keystore(Node, 1, Acc, {Node, Sum+1})
+                 Node = node(Pid),
+                 case orddict:find(Node, Acc) of
+                    error -> Acc;
+                    {ok, Value} -> orddict:update_counter(Node, 1, Acc)
+                 end
              end,
-    Acc = lists:map(fun (Node) -> {Node, 0} end, Nodes),
+    Acc = orddict:from_list(lists:map(fun (Node) -> {Node, 0} end, Nodes)),
     NodeCount = lists:foldl(AccFun, Acc, Running),
-    lists:keysort(2, NodeCount).
-
-
-%% Meck cannot mock the erlang module, hence this indirection
--spec get_node(pid()) -> node().
-get_node(Pid) ->
-    erlang:node(Pid).
+    lists:keysort(2, orddict:to_list(NodeCount)).
 
 
 -spec ping_nodes([node()]) -> [node()] | [].
