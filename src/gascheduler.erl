@@ -258,6 +258,12 @@ ping_nodes(Nodes) ->
                  Nodes).
 
 
+-spec log_retry(any(), any(), mfa()) -> ok.
+log_retry(Type, Error, MFA) ->
+    error_logger:warning_msg("gascheduler: caught ~p:~p in ~p -> retrying",
+                             [Type, Error, MFA]).
+
+
 %% Executes MFA MaxRetries times
 -spec execute_do(mfa(), non_neg_integer()) -> result().
 execute_do(_MFA, 0) ->
@@ -265,13 +271,15 @@ execute_do(_MFA, 0) ->
 execute_do(MFA = {Mod, Fun, Args}, infinity) ->
     try
         {ok, apply(Mod, Fun, Args)}
-    catch _:_ ->
+    catch Type:Error ->
+        log_retry(Type, Error, MFA),
         execute_do(MFA, infinity)
     end;
 execute_do(MFA = {Mod, Fun, Args}, MaxRetries) ->
     try
         {ok, apply(Mod, Fun, Args)}
-    catch _:_ ->
+    catch Type:Error ->
+        log_retry(Type, Error, MFA),
         execute_do(MFA, MaxRetries - 1)
     end.
 
