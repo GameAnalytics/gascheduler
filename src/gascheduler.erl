@@ -262,13 +262,18 @@ ping_nodes(Nodes) ->
 -spec execute_do(mfa(), non_neg_integer()) -> result().
 execute_do(_MFA, 0) ->
     {error, {?MODULE, max_retries}};
+execute_do(MFA = {Mod, Fun, Args}, infinity) ->
+    try
+        {ok, apply(Mod, Fun, Args)}
+    catch _:_ ->
+        execute_do(MFA, infinity)
+    end;
 execute_do(MFA = {Mod, Fun, Args}, MaxRetries) ->
     try
         {ok, apply(Mod, Fun, Args)}
     catch _:_ ->
         execute_do(MFA, MaxRetries - 1)
     end.
-
 
 -spec worker_fun(pid(), mfa(), max_retries()) -> ok.
 worker_fun(Scheduler, MFA, MaxRetries) ->
