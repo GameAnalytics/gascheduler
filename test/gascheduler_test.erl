@@ -112,7 +112,7 @@ test_tasks(NumTasks, Nodes) ->
     Tasks = lists:seq(1, NumTasks),
     ok = lists:foreach(
         fun(Id) ->
-            ok = gascheduler:execute({gascheduler_test, sleep_100, [Id]})
+            ok = gascheduler:execute(test, {gascheduler_test, sleep_100, [Id]})
         end, Tasks),
     Received = lists:map(
         fun(_) ->
@@ -181,12 +181,12 @@ execute_tasks() ->
     MaxWorkers = 10,
     MaxRetries = 10,
     Client = self(),
-    {ok, _} = gascheduler:start_link(Nodes, Client, MaxWorkers, MaxRetries),
+    {ok, _} = gascheduler:start_link(test, Nodes, Client, MaxWorkers, MaxRetries),
 
     NumTasks = 25,
     test_tasks(NumTasks, Nodes),
 
-    Stats = gascheduler:stats(),
+    Stats = gascheduler:stats(test),
     ?assertEqual(proplists:get_value(ticks, Stats), NumTasks),
     ?assertEqual(proplists:get_value(pending, Stats), 0),
     ?assertEqual(proplists:get_value(running, Stats), 0),
@@ -196,7 +196,7 @@ execute_tasks() ->
     ?assertEqual(proplists:get_value(worker_nodes, Stats), [{MasterNode, 0},
                                                             {SlaveNode, 0}]),
 
-    gascheduler:stop(),
+    gascheduler:stop(test),
     kill_slaves(Slaves),
     receive_nodedown(Slaves),
 
@@ -227,12 +227,12 @@ max_workers() ->
         end),
     true = meck:validate(gascheduler),
 
-    {ok, _} = gascheduler:start_link(Nodes, Client, MaxWorkers, MaxRetries),
+    {ok, _} = gascheduler:start_link(test, Nodes, Client, MaxWorkers, MaxRetries),
 
     NumTasks = 5000,
     test_tasks(NumTasks, Nodes),
 
-    gascheduler:stop(),
+    gascheduler:stop(test),
     kill_slaves(Slaves),
     receive_nodedown(Slaves),
 
@@ -255,12 +255,12 @@ max_retries() ->
     NumTasks = 100,
     Client = self(),
 
-    {ok, _} = gascheduler:start_link(Nodes, Client, MaxWorkers, MaxRetries),
+    {ok, _} = gascheduler:start_link(test, Nodes, Client, MaxWorkers, MaxRetries),
 
     Tasks = lists:seq(1, NumTasks),
     ok = lists:foreach(
         fun(_) ->
-            ok = gascheduler:execute({gascheduler_test, fail, []})
+            ok = gascheduler:execute(test, {gascheduler_test, fail, []})
         end, Tasks),
     %% This will only succeed if we receive 100 errors.
     lists:foreach(
@@ -276,7 +276,7 @@ max_retries() ->
             end
          end, Tasks),
 
-    gascheduler:stop(),
+    gascheduler:stop(test),
     kill_slaves(Slaves),
     receive_nodedown(Slaves),
 
@@ -299,12 +299,12 @@ all_nodes_down() ->
     Nodes = setup_slaves(NumNodes),
     receive_nodeup(Nodes),
 
-    {ok, _} = gascheduler:start_link(Nodes, Client, MaxWorkers, MaxRetries),
+    {ok, _} = gascheduler:start_link(test, Nodes, Client, MaxWorkers, MaxRetries),
 
     Tasks = lists:seq(1, NumTasks),
     lists:foreach(
         fun(Id) ->
-            ok = gascheduler:execute({gascheduler_test, sleep_1000, [Id]})
+            ok = gascheduler:execute(test, {gascheduler_test, sleep_1000, [Id]})
         end, Tasks),
 
     kill_slaves(Nodes),
@@ -312,7 +312,8 @@ all_nodes_down() ->
 
     NewNodes = setup_slaves(11, 20),
     receive_nodeup(NewNodes),
-    lists:foreach(fun gascheduler:add_worker_node/1, NewNodes),
+    lists:foreach(fun(Node) -> gascheduler:add_worker_node(test, Node) end,
+                  NewNodes),
 
     Received = lists:map(
         fun(_) ->
@@ -336,7 +337,7 @@ all_nodes_down() ->
     %% we could have received a particular task twice.
     ?assertEqual(lists:usort(Received), Tasks),
 
-    gascheduler:stop(),
+    gascheduler:stop(test),
     kill_slaves(NewNodes),
     receive_nodedown(NewNodes),
 
@@ -360,12 +361,12 @@ node_down() ->
           = [get_master() | Slaves],
     receive_nodeup(Slaves),
 
-    {ok, _} = gascheduler:start_link(Nodes, Client, MaxWorkers, MaxRetries),
+    {ok, _} = gascheduler:start_link(test, Nodes, Client, MaxWorkers, MaxRetries),
 
     Tasks = lists:seq(1, NumTasks),
     ok = lists:foreach(
         fun(_) ->
-            ok = gascheduler:execute({gascheduler_test, kill_if, [Slave1]})
+            ok = gascheduler:execute(test, {gascheduler_test, kill_if, [Slave1]})
         end, Tasks),
     receive_nodedown([Slave1]),
 
@@ -385,7 +386,7 @@ node_down() ->
             end
          end, Tasks),
 
-    gascheduler:stop(),
+    gascheduler:stop(test),
     kill_slaves([Slave2]),
     receive_nodedown([Slave2]),
 
