@@ -16,7 +16,8 @@ gascheduler_test_() ->
       {spawn, {timeout, 60, ?_test(max_workers())}},
       {spawn, {timeout, 10, ?_test(max_retries())}},
       {spawn, {timeout, 10, ?_test(all_nodes_down())}},
-      {spawn, {timeout, 10, ?_test(node_down())}}
+      {spawn, {timeout, 10, ?_test(node_down())}},
+      {spawn, {timeout, 10, ?_test(unfinished())}}
     ]}.
 
 %%
@@ -389,5 +390,51 @@ node_down() ->
     gascheduler:stop(test),
     kill_slaves([Slave2]),
     receive_nodedown([Slave2]),
+
+    ok.
+
+
+%% Start 3 nodes
+%% Start the scheduler
+%% Start 100 tasks that sleep and check all are unfinished
+unfinished() ->
+    ok = net_kernel:monitor_nodes(true),
+    NumNodes = 3,
+    MaxWorkers = 10,
+    MaxRetries = 10,
+    NumTasks = 100,
+    Client = self(),
+
+    Slaves = setup_slaves(NumNodes - 1),
+    Nodes = [get_master() | Slaves],
+    receive_nodeup(Slaves),
+
+    {ok, _} = gascheduler:start_link(test, Nodes, Client, MaxWorkers, MaxRetries),
+
+    Tasks = lists:seq(1, NumTasks),
+    ok = lists:foreach(
+        fun(Id) ->
+            ok = gascheduler:execute(test, {gascheduler_test, sleep_1000, [Id]})
+        end, Tasks),
+
+    Unfinished = [hd(Args) || {_Mod, _Fun, Args} <- gascheduler:unfinished(test)],
+    ?assertEqual(lists:sort(Unfinished), Tasks),
+
+    %% This will only succeed if we receive 100 successes.
+    lists:foreach(
+        fun(_) ->
+            receive
+                {{ok, _Id}, _Node, {Mod, Fun, _Args}} ->
+                    ?assertEqual(gascheduler_test, Mod),
+                    ?assertEqual(sleep_1000, Fun);
+                Msg ->
+                    error_logger:error_msg("unexpected message: ~p", [Msg]),
+                    ?assert(false)
+            end
+         end, Tasks),
+
+    gascheduler:stop(test),
+    kill_slaves(Slaves),
+    receive_nodedown(Slaves),
 
     ok.
