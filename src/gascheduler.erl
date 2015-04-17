@@ -9,7 +9,8 @@
          stop/1,
          execute/2,
          add_worker_node/2,
-         stats/1]).
+         stats/1,
+         unfinished/1]).
 
 %% For workers
 -export([notify_client/4,
@@ -90,6 +91,11 @@ add_worker_node(Name, Node) ->
 stats(Name) ->
   gen_server:call(Name, stats).
 
+%% Return all tasks that are not yet finished.
+-spec unfinished(atom()) -> list(mfa()).
+unfinished(Name) ->
+    gen_server:call(Name, unfinished).
+
 %%% For workers
 
 -spec notify_client(pid(), result(), pid(), mfa()) -> ok.
@@ -145,6 +151,11 @@ handle_call(stats, _From, State = #state{nodes = Nodes,
 handle_call(stop, _From, State) ->
     %% TODO(cdevries): kill workers
     {stop, normal, ok, State};
+
+handle_call(unfinished, _From, State = #state{pending = Pending,
+                                              running = Running}) ->
+    Reply = queue:to_list(Pending) ++ [MFA || {_Pid, MFA} <- Running],
+    {reply, Reply, State};
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
@@ -228,7 +239,7 @@ sort_nodes(Running, Nodes) ->
                  Node = node(Pid),
                  case orddict:find(Node, Acc) of
                     error -> Acc;
-                    {ok, Value} -> orddict:update_counter(Node, 1, Acc)
+                    {ok, _Value} -> orddict:update_counter(Node, 1, Acc)
                  end
              end,
     Acc = orddict:from_list(lists:map(fun (Node) -> {Node, 0} end, Nodes)),
