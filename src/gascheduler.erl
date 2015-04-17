@@ -5,11 +5,11 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/4,
-         stop/0,
-         execute/1,
-         add_worker_node/1,
-         stats/0]).
+-export([start_link/5,
+         stop/1,
+         execute/2,
+         add_worker_node/2,
+         stats/1]).
 
 %% For workers
 -export([notify_client/4,
@@ -65,30 +65,30 @@
 
 %%% API
 
--spec start_link(worker_nodes(), client(), max_workers(), max_retries())
+-spec start_link(atom(), worker_nodes(), client(), max_workers(), max_retries())
           -> {ok, pid()}.
-start_link(Nodes, Client, MaxWorkers, MaxRetries) ->
-    gen_server:start_link({local, ?MODULE}, ?MODULE,
+start_link(Name, Nodes, Client, MaxWorkers, MaxRetries) ->
+    gen_server:start_link({local, Name}, ?MODULE,
                            [Nodes, Client, MaxWorkers, MaxRetries], []).
 
--spec stop() -> ok.
-stop() ->
-    gen_server:call(?MODULE, stop).
+-spec stop(atom()) -> ok.
+stop(Name) ->
+    gen_server:call(Name, stop).
 
--spec execute(mfa()) -> ok.
-execute(MFA) ->
-    gen_server:call(?MODULE, {execute, MFA}).
+-spec execute(atom(), mfa()) -> ok.
+execute(Name, MFA) ->
+    gen_server:call(Name, {execute, MFA}).
 
--spec add_worker_node(node()) -> ok | node_not_found.
-add_worker_node(Node) ->
+-spec add_worker_node(atom(), node()) -> ok | node_not_found.
+add_worker_node(Name, Node) ->
     %% If all worker nodes were down then a tick needs to be sent to restart
     %% scheduling of pending tasks.
-    ok = gen_server:cast(?MODULE, tick),
-    gen_server:call(?MODULE, {add_worker_node, Node}).
+    ok = gen_server:cast(Name, tick),
+    gen_server:call(Name, {add_worker_node, Node}).
 
--spec stats() -> stats().
-stats() ->
-  gen_server:call(?MODULE, stats).
+-spec stats(atom()) -> stats().
+stats(Name) ->
+  gen_server:call(Name, stats).
 
 %%% For workers
 
@@ -309,5 +309,5 @@ pending_to_running(State = #state{pending = Pending,
 %% free in the run queue.
 -spec remove_worker(pid(), running()) -> running().
 remove_worker(Worker, Running) ->
-    ok = gen_server:cast(?MODULE, tick),
+    ok = gen_server:cast(self(), tick),
     lists:keydelete(Worker, 1, Running).
