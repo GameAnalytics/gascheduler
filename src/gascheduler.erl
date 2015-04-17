@@ -176,7 +176,7 @@ handle_cast({Result, Worker, MFA}, State = #state{running = Running,
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
-% pre: notify_client/3 was called
+%% pre: notify_client/3 was called
 handle_info({'EXIT', _Worker, normal}, State) ->
     {noreply, State};
 
