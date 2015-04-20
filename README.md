@@ -8,7 +8,7 @@ application.
 Tasks are controlled by a state machine depicted in the following picture.
 
 ```
-  execute({Mod, Fun, Args})
+  execute(MFA = {Mod, Fun, Args})
              |
              |
              v
@@ -21,11 +21,14 @@ node down         spawn worker
         |     exception           retry
         |         |                 |
         |         `--->[ Failed ]---'
-     success               |
-        |         max retries exceeded
-        |                  |
-        |                  v
-        |         {error, failed_max_retries_times}
+     success           |        |
+        |        max retries  MFA called
+        |         exceeded    throw(gascheduler_permanent_failure)
+        |              |        |
+        |              v        |
+        |  {error, max_retries} |
+        |                       v
+        |                   {error, permanent_failure}
         v
 {ok, Result = apply(Mod, Fun, Args)}
 ```
