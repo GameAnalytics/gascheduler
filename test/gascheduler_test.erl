@@ -267,7 +267,7 @@ max_retries() ->
     lists:foreach(
         fun(_) ->
             receive
-                {gascheduler, {error, {gascheduler, max_retries}}, _Node, {Mod, Fun, Args}} ->
+                {gascheduler, {error, max_retries}, _Node, {Mod, Fun, Args}} ->
                     ?assertEqual(gascheduler_test, Mod),
                     ?assertEqual(fail, Fun),
                     ?assertEqual(length(Args), 0);
