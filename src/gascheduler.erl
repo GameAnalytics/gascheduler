@@ -250,7 +250,8 @@ sort_nodes(Running, Nodes) ->
 
 -spec ping_nodes([node()]) -> [node()] | [].
 ping_nodes(Nodes) ->
-    lists:filter(fun(Node) ->
+    lists:filter(fun(Node) when Node =:= node() -> true;
+                    (Node) ->
                      case net_adm:ping(Node) of
                          pong -> true;
                          _    -> false
