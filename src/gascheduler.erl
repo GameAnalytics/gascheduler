@@ -170,7 +170,7 @@ handle_cast(tick, State = #state{ticks = Ticks, pending = Pending}) ->
 
 handle_cast({Result, Worker, MFA}, State = #state{running = Running,
                                                   client = Client}) ->
-    Client ! {gascheduler, Result, node(Worker), MFA},
+    Client ! {?MODULE, Result, node(Worker), MFA},
     {noreply, State#state{running = remove_worker(Worker, Running)}};
 
 handle_cast(_Msg, State) ->
@@ -267,7 +267,7 @@ log_retry(Type, Error, MFA) ->
 %% Executes MFA MaxRetries times
 -spec execute_do(mfa(), non_neg_integer()) -> result().
 execute_do(_MFA, 0) ->
-    {error, {?MODULE, max_retries}};
+    {error, max_retries};
 execute_do(MFA = {Mod, Fun, Args}, infinity) ->
     try
         {ok, apply(Mod, Fun, Args)}
