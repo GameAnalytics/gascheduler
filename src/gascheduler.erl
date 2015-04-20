@@ -170,7 +170,8 @@ handle_cast(tick, State = #state{ticks = Ticks, pending = Pending}) ->
 
 handle_cast({Result, Worker, MFA}, State = #state{running = Running,
                                                   client = Client}) ->
-    Client ! {?MODULE, Result, node(Worker), MFA},
+    {registered_name, Name} = process_info(self(), registered_name),
+    Client ! {Name, Result, node(Worker), MFA},
     {noreply, State#state{running = remove_worker(Worker, Running)}};
 
 handle_cast(_Msg, State) ->
