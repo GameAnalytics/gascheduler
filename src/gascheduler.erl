@@ -266,6 +266,12 @@ log_retry(Type, Error, MFA) ->
                              [Type, Error, MFA]).
 
 
+-spec log_permanent_failure(any(), any(), mfa()) -> ok.
+log_permanent_failure(Type, Error, MFA) ->
+    error_logger:error_msg("gascheduler: caught ~p:~p in ~p -> giving up, permanent failure",
+                            [Type, Error, MFA]).
+
+
 %% Executes MFA MaxRetries times
 -spec execute_do(mfa(), non_neg_integer()) -> result().
 execute_do(_MFA, 0) ->
@@ -273,16 +279,24 @@ execute_do(_MFA, 0) ->
 execute_do(MFA = {Mod, Fun, Args}, infinity) ->
     try
         {ok, apply(Mod, Fun, Args)}
-    catch Type:Error ->
-        log_retry(Type, Error, MFA),
-        execute_do(MFA, infinity)
+    catch
+        throw:gascheduler_permanent_failure ->
+            log_permanent_failure(throw, gascheduler_permanent_failure, MFA),
+            {error, permanent_failure};
+        Type:Error ->
+            log_retry(Type, Error, MFA),
+            execute_do(MFA, infinity)
     end;
 execute_do(MFA = {Mod, Fun, Args}, MaxRetries) ->
     try
         {ok, apply(Mod, Fun, Args)}
-    catch Type:Error ->
-        log_retry(Type, Error, MFA),
-        execute_do(MFA, MaxRetries - 1)
+    catch
+        throw:gascheduler_permanent_failure ->
+            log_permanent_failure(throw, gascheduler_permanent_failure, MFA),
+            {error, permanent_failure};
+        Type:Error ->
+            log_retry(Type, Error, MFA),
+            execute_do(MFA, MaxRetries - 1)
     end.
 
 -spec worker_fun(pid(), mfa(), max_retries()) -> ok.
