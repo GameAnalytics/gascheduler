@@ -477,7 +477,7 @@ permanent_failure() ->
     Received = lists:map(
         fun(_) ->
             receive
-                {gascheduler, {error, permanent_failure}, Node, {Mod, Fun, Args}} ->
+                {test, {error, permanent_failure}, Node, {Mod, Fun, Args}} ->
                     ?assertEqual(gascheduler_test, Mod),
                     ?assertEqual(fail_permanently, Fun),
                     Id = hd(Args),
