@@ -5,6 +5,7 @@
 -export([sleep_100/1,
          sleep_1000/1,
          fail/0,
+         fail_permanently/1,
          kill_if/1]).
 
 gascheduler_test_() ->
@@ -17,7 +18,8 @@ gascheduler_test_() ->
       {spawn, {timeout, 10, ?_test(max_retries())}},
       {spawn, {timeout, 10, ?_test(all_nodes_down())}},
       {spawn, {timeout, 10, ?_test(node_down())}},
-      {spawn, {timeout, 10, ?_test(unfinished())}}
+      {spawn, {timeout, 10, ?_test(unfinished())}},
+      {spawn, {timeout, 10, ?_test(permanent_failure())}}
     ]}.
 
 %%
@@ -98,6 +100,14 @@ sleep_1000(Id) ->
 
 fail() ->
     throw(testing_max_retries).
+
+
+fail_permanently(Id) ->
+    %% Pause execution to fill up tasks on all nodes. If jobs execute too
+    %% quickly they may all be execute on 1 node.
+    timer:sleep(100),
+    throw(gascheduler_permanent_failure),
+    Id.
 
 
 kill_if(Node) ->
@@ -432,6 +442,57 @@ unfinished() ->
                     ?assert(false)
             end
          end, Tasks),
+
+    gascheduler:stop(test),
+    kill_slaves(Slaves),
+    receive_nodedown(Slaves),
+
+    ok.
+
+
+%% Start 5 nodes
+%% Start the scheduler
+%% Start 100 tasks that permanently fail
+permanent_failure() ->
+    ok = net_kernel:monitor_nodes(true),
+    NumNodes = 5,
+    MaxWorkers = 10,
+    MaxRetries = 10,
+    NumTasks = 100,
+    Client = self(),
+
+    Slaves = setup_slaves(NumNodes - 1),
+    Nodes = [get_master() | Slaves],
+    receive_nodeup(Slaves),
+
+    {ok, _} = gascheduler:start_link(test, Nodes, Client, MaxWorkers, MaxRetries),
+
+    Tasks = lists:seq(1, NumTasks),
+    ok = lists:foreach(
+        fun(Id) ->
+            ok = gascheduler:execute(test, {gascheduler_test, fail_permanently, [Id]})
+        end, Tasks),
+
+    %% This will only succeed if we receive 100 failures.
+    Received = lists:map(
+        fun(_) ->
+            receive
+                {gascheduler, {error, permanent_failure}, Node, {Mod, Fun, Args}} ->
+                    ?assertEqual(gascheduler_test, Mod),
+                    ?assertEqual(fail_permanently, Fun),
+                    Id = hd(Args),
+                    {Id, Node};
+                Msg ->
+                    error_logger:error_msg("unexpected message: ~p", [Msg]),
+                    ?assert(false)
+            end
+         end, Tasks),
+
+    {ReceivedTasks, ReceivedNodes} = lists:unzip(Received),
+
+    %% Check that all tasks failed.
+    ?assertEqual(lists:usort(ReceivedTasks), Tasks),
+    ?assertEqual(lists:usort(ReceivedNodes), lists:sort(Nodes)),
 
     gascheduler:stop(test),
     kill_slaves(Slaves),
