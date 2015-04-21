@@ -109,7 +109,7 @@ init([Nodes, Client, MaxWorkers, MaxRetries]) ->
     ok = net_kernel:monitor_nodes(true),
 
     AliveNodes = ping_nodes(Nodes),
-    error_logger:info_msg("scheduler: will use these nodes = ~p", [AliveNodes]),
+    error_logger:info_msg("gascheduler: will use these nodes = ~p", [AliveNodes]),
 
     {ok, #state{nodes = AliveNodes,
                 client = Client,
@@ -195,7 +195,7 @@ handle_info({'EXIT', Worker, _Reason}, State = #state{pending = Pending,
                           running = remove_worker(Worker, Running)}};
 
 handle_info({nodedown, NodeDown}, State = #state{nodes = Nodes}) ->
-    error_logger:warning_msg("scheduler: removing node ~p because it is down",
+    error_logger:warning_msg("gascheduler: removing node ~p because it is down",
                              [NodeDown]),
     %% Note that nodedown messages for nodes can appear before EXIT messages
     %% from workers. Therefore, we can have a state where there are tasks still
@@ -203,12 +203,12 @@ handle_info({nodedown, NodeDown}, State = #state{nodes = Nodes}) ->
     {noreply, State#state{nodes = lists:delete(NodeDown, Nodes)}};
 
 handle_info(Info, State) ->
-    error_logger:warning_msg("scheduler: unexpected message ~p", [Info]),
+    error_logger:warning_msg("gascheduler: unexpected message ~p", [Info]),
     {noreply, State}.
 
 
 terminate(Reason, #state{running = Running, pending = Pending} = _State) ->
-    error_logger:warning_msg("scheduler: terminating with reason ~p and "
+    error_logger:warning_msg("gascheduler: terminating with reason ~p and "
                              "~p running tasks and ~p pending tasks",
                              [Reason, length(Running), queue:len(Pending)]),
     ok.
