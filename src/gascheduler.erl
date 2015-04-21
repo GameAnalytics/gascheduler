@@ -148,9 +148,13 @@ handle_call(stats, _From, State = #state{nodes = Nodes,
              {worker_nodes, sort_nodes(Running, Nodes)}],
     {reply, Reply, State};
 
-handle_call(stop, _From, State) ->
-    %% TODO(cdevries): kill workers
-    {stop, normal, ok, State};
+handle_call(stop, _From, State = #state{running = Running, pending = Pending}) ->
+    case Running =:= [] andalso queue:is_empty(Pending) of
+        true ->
+            {stop, normal, ok, State};
+        false ->
+            {stop, normal, {error, {not_empty, Running, Pending}}, State}
+    end;
 
 handle_call(unfinished, _From, State = #state{pending = Pending,
                                               running = Running}) ->

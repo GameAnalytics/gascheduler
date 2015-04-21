@@ -207,7 +207,7 @@ execute_tasks() ->
     ?assertEqual(proplists:get_value(worker_nodes, Stats), [{MasterNode, 0},
                                                             {SlaveNode, 0}]),
 
-    gascheduler:stop(test),
+    ok = gascheduler:stop(test),
     kill_slaves(Slaves),
     receive_nodedown(Slaves),
 
@@ -243,7 +243,7 @@ max_workers() ->
     NumTasks = 5000,
     test_tasks(NumTasks, Nodes),
 
-    gascheduler:stop(test),
+    ok = gascheduler:stop(test),
     kill_slaves(Slaves),
     receive_nodedown(Slaves),
 
@@ -287,7 +287,7 @@ max_retries() ->
             end
          end, Tasks),
 
-    gascheduler:stop(test),
+    ok = gascheduler:stop(test),
     kill_slaves(Slaves),
     receive_nodedown(Slaves),
 
@@ -348,7 +348,7 @@ all_nodes_down() ->
     %% we could have received a particular task twice.
     ?assertEqual(lists:usort(Received), Tasks),
 
-    gascheduler:stop(test),
+    ok = gascheduler:stop(test),
     kill_slaves(NewNodes),
     receive_nodedown(NewNodes),
 
@@ -397,7 +397,7 @@ node_down() ->
             end
          end, Tasks),
 
-    gascheduler:stop(test),
+    ok = gascheduler:stop(test),
     kill_slaves([Slave2]),
     receive_nodedown([Slave2]),
 
@@ -443,7 +443,7 @@ unfinished() ->
             end
          end, Tasks),
 
-    gascheduler:stop(test),
+    ok = gascheduler:stop(test),
     kill_slaves(Slaves),
     receive_nodedown(Slaves),
 
@@ -494,7 +494,7 @@ permanent_failure() ->
     ?assertEqual(lists:usort(ReceivedTasks), Tasks),
     ?assertEqual(lists:usort(ReceivedNodes), lists:sort(Nodes)),
 
-    gascheduler:stop(test),
+    ok = gascheduler:stop(test),
     kill_slaves(Slaves),
     receive_nodedown(Slaves),
 
