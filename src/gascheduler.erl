@@ -207,6 +207,9 @@ handle_info(Info, State) ->
     {noreply, State}.
 
 
+terminate(normal, _State) ->
+    ok;
+
 terminate(Reason, #state{running = Running, pending = Pending} = _State) ->
     error_logger:warning_msg("gascheduler: terminating with reason ~p and "
                              "~p running tasks and ~p pending tasks",
