@@ -291,7 +291,9 @@ execute_do(MFA = {Mod, Fun, Args}, infinity) ->
             log_permanent_failure(throw, gascheduler_permanent_failure, MFA),
             {error, permanent_failure};
         Type:Error ->
+            error_logger:error_msg("~p", [erlang:get_stacktrace()]),
             log_retry(Type, Error, MFA),
+            timer:sleep(1000),
             execute_do(MFA, infinity)
     end;
 execute_do(MFA = {Mod, Fun, Args}, MaxRetries) ->
