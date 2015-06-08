@@ -10,11 +10,12 @@
          execute/2,
          add_worker_node/2,
          stats/1,
-         unfinished/1]).
+         unfinished/1,
+         set_retry_timeout/2]).
 
 %% For workers
 -export([notify_client/4,
-         worker_fun/3]).
+         worker_fun/4]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -62,7 +63,11 @@
                 running :: running(),
 
                 %% the number of times the scheduler has been run
-                ticks :: non_neg_integer()}).
+                ticks :: non_neg_integer(),
+
+                %% wait this long before retrying a task on failure
+                retry_timeout :: non_neg_integer()}).
+
 
 %%% API
 
@@ -96,6 +101,11 @@ stats(Name) ->
 unfinished(Name) ->
     gen_server:call(Name, unfinished).
 
+-spec set_retry_timeout(atom(), non_neg_integer()) -> ok.
+set_retry_timeout(Name, RetryTimeout) ->
+    gen_server:call(Name, {set_retry_timeout, RetryTimeout}).
+
+
 %%% For workers
 
 -spec notify_client(pid(), result(), pid(), mfa()) -> ok.
@@ -115,6 +125,7 @@ init([Nodes, Client, MaxWorkers, MaxRetries]) ->
                 client = Client,
                 max_workers = MaxWorkers,
                 max_retries = MaxRetries,
+                retry_timeout = 1000,
                 pending = queue:new(),
                 running = [],
                 ticks = 0}}.
@@ -160,6 +171,9 @@ handle_call(unfinished, _From, State = #state{pending = Pending,
                                               running = Running}) ->
     Reply = queue:to_list(Pending) ++ [MFA || {_Pid, MFA} <- Running],
     {reply, Reply, State};
+
+handle_call({set_retry_timeout, Timeout}, _From, State) ->
+    {reply, ok, State#state{retry_timeout = Timeout}};
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
@@ -267,10 +281,13 @@ ping_nodes(Nodes) ->
                  Nodes).
 
 
--spec log_retry(any(), any(), mfa()) -> ok.
-log_retry(Type, Error, MFA) ->
-    error_logger:warning_msg("gascheduler: caught ~p:~p in ~p -> retrying",
-                             [Type, Error, MFA]).
+-spec log_retry_wait(any(), any(), mfa(), non_neg_integer()) -> ok.
+log_retry_wait(Type, Error, MFA, RetryTimeout) ->
+    error_logger:warning_msg("gascheduler: caught ~p:~p in ~p -> retrying: stacktrace:~n~p",
+                             [Type, Error, MFA, erlang:get_stacktrace()]),
+    %% We wait here because otherwise we can spawn new Erlang processes faster
+    %% than we clean them up.
+    timer:sleep(RetryTimeout).
 
 
 -spec log_permanent_failure(any(), any(), mfa()) -> ok.
@@ -280,10 +297,10 @@ log_permanent_failure(Type, Error, MFA) ->
 
 
 %% Executes MFA MaxRetries times
--spec execute_do(mfa(), non_neg_integer()) -> result().
-execute_do(_MFA, 0) ->
+-spec execute_do(mfa(), non_neg_integer(), non_neg_integer()) -> result().
+execute_do(_MFA, 0, _RetryTimeout) ->
     {error, max_retries};
-execute_do(MFA = {Mod, Fun, Args}, infinity) ->
+execute_do(MFA = {Mod, Fun, Args}, infinity, RetryTimeout) ->
     try
         {ok, apply(Mod, Fun, Args)}
     catch
@@ -291,12 +308,10 @@ execute_do(MFA = {Mod, Fun, Args}, infinity) ->
             log_permanent_failure(throw, gascheduler_permanent_failure, MFA),
             {error, permanent_failure};
         Type:Error ->
-            error_logger:error_msg("~p", [erlang:get_stacktrace()]),
-            log_retry(Type, Error, MFA),
-            timer:sleep(1000),
-            execute_do(MFA, infinity)
+            log_retry_wait(Type, Error, MFA, RetryTimeout),
+            execute_do(MFA, infinity, RetryTimeout)
     end;
-execute_do(MFA = {Mod, Fun, Args}, MaxRetries) ->
+execute_do(MFA = {Mod, Fun, Args}, MaxRetries, RetryTimeout) ->
     try
         {ok, apply(Mod, Fun, Args)}
     catch
@@ -304,14 +319,14 @@ execute_do(MFA = {Mod, Fun, Args}, MaxRetries) ->
             log_permanent_failure(throw, gascheduler_permanent_failure, MFA),
             {error, permanent_failure};
         Type:Error ->
-            log_retry(Type, Error, MFA),
-            execute_do(MFA, MaxRetries - 1)
+            log_retry_wait(Type, Error, MFA, RetryTimeout),
+            execute_do(MFA, MaxRetries - 1, RetryTimeout)
     end.
 
--spec worker_fun(pid(), mfa(), max_retries()) -> ok.
-worker_fun(Scheduler, MFA, MaxRetries) ->
+-spec worker_fun(pid(), mfa(), max_retries(), non_neg_integer()) -> ok.
+worker_fun(Scheduler, MFA, MaxRetries, RetryTimeout) ->
     Worker = self(),
-    Result = execute_do(MFA, MaxRetries),
+    Result = execute_do(MFA, MaxRetries, RetryTimeout),
     gascheduler:notify_client(Scheduler, Result, Worker, MFA).
 
 
@@ -321,13 +336,14 @@ execute_try(MFA, State = #state{nodes = Nodes,
                                 pending = Pending,
                                 running = Running,
                                 max_workers = MaxWorkers,
-                                max_retries = MaxRetries}) ->
+                                max_retries = MaxRetries,
+                                retry_timeout = RetryTimeout}) ->
     Scheduler = self(),
     case get_free_node(Nodes, MaxWorkers, Running) of
         undefined ->
             State#state{pending = queue:in(MFA, Pending)};
         Node ->
-            Args = [Scheduler, MFA, MaxRetries],
+            Args = [Scheduler, MFA, MaxRetries, RetryTimeout],
             WorkerPid = spawn_link(Node, ?MODULE, worker_fun, Args),
             State#state{running = [{WorkerPid, MFA} | Running]}
     end.
