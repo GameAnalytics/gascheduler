@@ -204,11 +204,15 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 %% pre: notify_client/3 was called
-handle_info({'EXIT', _Worker, normal}, State) ->
+handle_info({'EXIT', Worker, normal}, State) ->
+    error_logger:info_msg("SCHEDULER(exit=normal): worker=~p", [Worker]),
     {noreply, State};
 
-handle_info({'EXIT', Worker, _Reason}, State = #state{pending = Pending,
+handle_info({'EXIT', Worker, Reason}, State = #state{pending = Pending,
                                                       running = Running}) ->
+
+    error_logger:info_msg("SCHEDULER(exit=~p): worker=~p", [Reason, Worker]),
+
     %% Even though we catch all exceptions this is still required because
     %% exceptions are not raised when a node becomes unavailable.
     %% We move the task back to pending at the front of queue.
