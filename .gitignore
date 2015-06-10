@@ -13,3 +13,4 @@ tmp/
 .edts
 tags
 .deps_plt
+.rebar/
