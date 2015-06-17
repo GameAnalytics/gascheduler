@@ -210,7 +210,7 @@ handle_info({'EXIT', Client, Reason}, State = #state{client = Client}) ->
     error_logger:info_msg("gascheduler: stop from client - ~s~n", [Reason]),
     {stop, normal, State};
 handle_info({'EXIT', Worker, normal}, State) ->
-    error_logger:info_msg("normal exit here from=~p", [process_info(Worker)]),
+    error_logger:info_msg("normal exit here from=~p", [Worker]),
     {noreply, State};
 handle_info({'EXIT', Worker, _Reason}, State = #state{pending = Pending,
                                                       running = Running}) ->
