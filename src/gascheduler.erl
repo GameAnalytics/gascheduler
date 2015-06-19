@@ -224,17 +224,10 @@ handle_info({'EXIT', Worker, _Reason}, State = #state{pending = Pending,
                 true ->
                     error_logger:info_msg("gascheduler: running=~p, pending=~p",
                                           [length(Running), queue:len(Pending)]),
-                    error_logger:warning_msg("gascheduler: STOPPING1 from=~p, client=~p",
-                                             [Worker, State#state.client]),
-                    case State#state.client =:= Worker of
-                        true ->
-                            {stop, normal, State};
-                        false ->
-                            {noreply, State}
-                    end;
+                    {stop, normal, State};
                 false ->
-                    error_logger:warning_msg("gascheduler: STOPPING2 from=~p, client=~p",
-                                             [Worker, State#state.client]),
+                    error_logger:warning_msg("gascheduler: running=~p, pending=~p",
+                                          [length(Running), queue:len(Pending)]),
                     {noreply, State}
             end;
         {ok, MFA} ->
