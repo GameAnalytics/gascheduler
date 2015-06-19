@@ -193,6 +193,7 @@ execute_tasks() ->
     MaxRetries = 10,
     Client = self(),
     {ok, _} = gascheduler:start_link(test, Nodes, Client, MaxWorkers, MaxRetries),
+    ok = gascheduler:set_retry_timeout(test, 0),
 
     NumTasks = 25,
     test_tasks(NumTasks, Nodes),
@@ -239,6 +240,7 @@ max_workers() ->
     true = meck:validate(gascheduler),
 
     {ok, _} = gascheduler:start_link(test, Nodes, Client, MaxWorkers, MaxRetries),
+    ok = gascheduler:set_retry_timeout(test, 0),
 
     NumTasks = 5000,
     test_tasks(NumTasks, Nodes),
@@ -267,6 +269,7 @@ max_retries() ->
     Client = self(),
 
     {ok, _} = gascheduler:start_link(test, Nodes, Client, MaxWorkers, MaxRetries),
+    ok = gascheduler:set_retry_timeout(test, 0),
 
     Tasks = lists:seq(1, NumTasks),
     ok = lists:foreach(
@@ -311,6 +314,7 @@ all_nodes_down() ->
     receive_nodeup(Nodes),
 
     {ok, _} = gascheduler:start_link(test, Nodes, Client, MaxWorkers, MaxRetries),
+    ok = gascheduler:set_retry_timeout(test, 0),
 
     Tasks = lists:seq(1, NumTasks),
     lists:foreach(
@@ -373,6 +377,7 @@ node_down() ->
     receive_nodeup(Slaves),
 
     {ok, _} = gascheduler:start_link(test, Nodes, Client, MaxWorkers, MaxRetries),
+    ok = gascheduler:set_retry_timeout(test, 0),
 
     Tasks = lists:seq(1, NumTasks),
     ok = lists:foreach(
@@ -420,6 +425,7 @@ unfinished() ->
     receive_nodeup(Slaves),
 
     {ok, _} = gascheduler:start_link(test, Nodes, Client, MaxWorkers, MaxRetries),
+    ok = gascheduler:set_retry_timeout(test, 0),
 
     Tasks = lists:seq(1, NumTasks),
     ok = lists:foreach(
@@ -466,6 +472,7 @@ permanent_failure() ->
     receive_nodeup(Slaves),
 
     {ok, _} = gascheduler:start_link(test, Nodes, Client, MaxWorkers, MaxRetries),
+    ok = gascheduler:set_retry_timeout(test, 0),
 
     Tasks = lists:seq(1, NumTasks),
     ok = lists:foreach(
