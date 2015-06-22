@@ -120,18 +120,14 @@ init([Nodes, Client, MaxWorkers, MaxRetries]) ->
     process_flag(trap_exit, true),
     ok = net_kernel:monitor_nodes(true),
 
-    AliveNodes = ping_nodes(Nodes),
-    error_logger:info_msg("gascheduler: will use these nodes = ~p",
-                          [AliveNodes]),
-
-    {ok, #state{nodes = AliveNodes,
-                client = Client,
-                max_workers = MaxWorkers,
-                max_retries = MaxRetries,
+    {ok, #state{nodes         = ping_nodes(Nodes),
+                client        = Client,
+                max_workers   = MaxWorkers,
+                max_retries   = MaxRetries,
                 retry_timeout = 1000,
-                pending = queue:new(),
-                running = [],
-                ticks = 0}}.
+                pending       = queue:new(),
+                running       = [],
+                ticks         = 0}}.
 
 handle_call({execute, MFA}, _From, State) ->
     {reply, ok, execute_try(MFA, State)};
@@ -231,12 +227,18 @@ handle_info(Info, State) ->
     error_logger:warning_msg("gascheduler: unexpected message ~p", [Info]),
     {noreply, State}.
 
-
-terminate(Reason, #state{running = Running, pending = Pending}) ->
-    error_logger:warning_msg("gascheduler: terminating with reason ~p and "
-                             "~p running tasks and ~p pending tasks",
-                             [Reason, length(Running), queue:len(Pending)]),
-    ok.
+terminate(Reason, #state{running = Running, pending = Pending} = _State) ->
+    case Reason =:= normal andalso Running =:= [] andalso queue:is_empty(Pending) of
+        true ->
+            %% No logging for normal shut down
+            ok;
+        false ->
+            error_logger:warning_msg(
+              "gascheduler: terminating with reason ~p and "
+              "~p running tasks and ~p pending tasks",
+              [Reason, length(Running), queue:len(Pending)]),
+            ok
+    end.
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
