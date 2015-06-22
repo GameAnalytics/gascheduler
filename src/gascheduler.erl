@@ -203,30 +203,43 @@ handle_info({'EXIT', Client, Reason}, State = #state{client = Client}) ->
     error_logger:info_msg("gascheduler: stop from client - ~s~n", [Reason]),
     {stop, normal, State};
 handle_info({'EXIT', Worker, normal}, State) ->
-    error_logger:info_msg("normal exit here from=~p", [Worker]),
+    error_logger:info_msg("gascheduler: normal exit from=~p", [Worker]),
     {noreply, State};
 handle_info({'EXIT', Worker, _Reason}, State = #state{pending = Pending,
                                                       running = Running}) ->
     %% Even though we catch all exceptions this is still required because
     %% exceptions are not raised when a node becomes unavailable.
     %% We move the task back to pending at the front of queue.
-    case get_running_worker(Worker, Running) of
-        not_found ->
-            %% Exit only if no worker is running
-            case Running =:= [] andalso queue:is_empty(Pending) of
-                true ->
-                    error_logger:info_msg("gascheduler: running=~p, pending=~p",
-                                          [length(Running), queue:len(Pending)]),
-                    {stop, normal, State};
-                false ->
-                    error_logger:warning_msg("gascheduler: running=~p, pending=~p",
-                                          [length(Running), queue:len(Pending)]),
-                    {noreply, State}
-            end;
-        {ok, MFA} ->
-            {noreply, State#state{pending = queue:in_r(MFA, Pending),
-                                  running = remove_worker(Worker, Running)}}
-    end;
+    error_logger:info_msg("gascheduler: unknown exit from=~p", [Worker]),
+    {_, MFA} = lists:keyfind(Worker, 1, Running),
+    {noreply, State#state{pending = queue:in_r(MFA, Pending),
+                          running = remove_worker(Worker, Running)}};
+%% handle_info({'EXIT', Worker, Reason}, State = #state{pending = Pending,
+%%                                                       running = Running}) ->
+%%     %% Even though we catch all exceptions this is still required because
+%%     %% exceptions are not raised when a node becomes unavailable.
+%%     %% We move the task back to pending at the front of queue.
+%%     case get_running_worker(Worker, Running) of
+%%         not_found ->
+%%             %% Exit only if no worker is running
+%%             case Running =:= [] andalso queue:is_empty(Pending) of
+%%                 true ->
+%%                     error_logger:info_msg("gascheduler: exit ~p - running=~p, "
+%%                                           "pending=~p", [Reason,
+%%                                                          length(Running),
+%%                                                          queue:len(Pending)]),
+%%                     {stop, normal, State};
+%%                 false ->
+%%                     error_logger:warning_msg("gascheduler: exit ~p running=~p,"
+%%                                              " pending=~p", [Reason,
+%%                                                              length(Running),
+%%                                                              queue:len(Pending)]),
+%%                     {noreply, State}
+%%             end;
+%%         {ok, MFA} ->
+%%             {noreply, State#state{pending = queue:in_r(MFA, Pending),
+%%                                   running = remove_worker(Worker, Running)}}
+%%     end;
 handle_info({nodedown, NodeDown}, State = #state{nodes = Nodes}) ->
     error_logger:warning_msg("gascheduler: removing node ~p because it is down",
                              [NodeDown]),
@@ -241,9 +254,8 @@ handle_info(Info, State) ->
 
 terminate(Reason, #state{running = Running, pending = Pending}) ->
     error_logger:warning_msg("gascheduler: terminating with reason ~p and "
-                             "~p running tasks and ~p pending tasks - ~p",
-                             [Reason, length(Running), queue:len(Pending),
-                              erlang:get_stacktrace()]),
+                             "~p running tasks and ~p pending tasks",
+                             [Reason, length(Running), queue:len(Pending)]),
     ok.
 
 code_change(_OldVsn, State, _Extra) ->
