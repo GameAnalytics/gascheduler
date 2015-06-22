@@ -13,7 +13,7 @@ gascheduler_test_() ->
      fun setup/0,
      fun teardown/1,
      [
-      {spawn, {timeout, 10, ?_test(execute_tasks())}},
+      {spawn, {timeout, 60, ?_test(execute_tasks())}},
       {spawn, {timeout, 60, ?_test(max_workers())}},
       {spawn, {timeout, 10, ?_test(max_retries())}},
       {spawn, {timeout, 10, ?_test(all_nodes_down())}},
@@ -21,158 +21,6 @@ gascheduler_test_() ->
       {spawn, {timeout, 10, ?_test(unfinished())}},
       {spawn, {timeout, 10, ?_test(permanent_failure())}}
     ]}.
-
-%%
-%% Setup
-%%
-
-get_master() ->
-    master@localhost.
-
-
-setup() ->
-    _ = os:cmd("epmd -daemon"),
-    {ok, _Master} = net_kernel:start([get_master(), shortnames]),
-    ok.
-
-
-teardown(_) ->
-    _ = net_kernel:stop(),
-    ok.
-
-
-setup_slaves(Num) ->
-    setup_slaves(1, Num).
-
-
-setup_slaves(Begin, End) ->
-    Slaves = [ Slave || {ok, Slave}
-                <- [ slave:start_link(localhost, "slave" ++ integer_to_list(N))
-                     || N <- lists:seq(Begin, End) ] ],
-    ?assertEqual(length(Slaves), End - Begin + 1),
-    Slaves.
-
-
-%%
-%% Utilities
-%%
-
-kill_slaves(Slaves) ->
-    lists:foreach(fun(Slave) -> ok = slave:stop(Slave) end, Slaves).
-
-
-receive_nodeatom(Atom, Nodes) ->
-    error_logger:info_msg("waiting for: ~p from ~p", [Atom, Nodes]),
-    Result = lists:foreach(
-        fun(_) ->
-            receive
-                {Atom, Node} ->
-                    case lists:member(Node, Nodes) of
-                        true -> error_logger:info_msg("received ~p from ~p",
-                                                      [Atom, Node]);
-                        false -> error_logger:error_msg(
-                                     "received ~p from UNKNOWN node ~p",
-                                     [Atom, Node])
-                    end
-            end
-        end, Nodes),
-    error_logger:info_msg("waiting for ~p SUCCESS", [Atom]),
-    Result.
-
-
-receive_nodeup(Nodes) ->
-    receive_nodeatom(nodeup, Nodes).
-
-
-receive_nodedown(Nodes) ->
-    receive_nodeatom(nodedown, Nodes).
-
-
-sleep_100(Id) ->
-   timer:sleep(100),
-   Id.
-
-
-sleep_1000(Id) ->
-   timer:sleep(1000),
-   Id.
-
-
-fail() ->
-    throw(testing_max_retries).
-
-
-fail_permanently(Id) ->
-    %% Pause execution to fill up tasks on all nodes. If jobs execute too
-    %% quickly they may all be execute on 1 node.
-    timer:sleep(100),
-    throw(gascheduler_permanent_failure),
-    Id.
-
-
-kill_if(Node) ->
-    %% Allow Node to be full before killing it.
-    timer:sleep(100),
-    case node() of
-        Node -> slave:stop(Node);
-        _ -> ok
-    end.
-
-
-test_tasks(NumTasks, Nodes) ->
-    Tasks = lists:seq(1, NumTasks),
-    ok = lists:foreach(
-        fun(Id) ->
-            ok = gascheduler:execute(test, {gascheduler_test, sleep_100, [Id]})
-        end, Tasks),
-    Received = lists:map(
-        fun(_) ->
-            receive
-                {test, {ok, Id}, Node, {Mod, Fun, Args}} ->
-                    ?assertEqual(gascheduler_test, Mod),
-                    ?assertEqual(sleep_100, Fun),
-                    ?assertEqual(length(Args), 1),
-                    ?assertEqual(hd(Args), Id),
-                    ?assert(lists:member(Node, Nodes)),
-                    ?assert(lists:member(Id, Tasks)),
-                    {Id, Node};
-                Msg ->
-                    error_logger:error_msg("unexpected message: ~p", [Msg]),
-                    ?assert(false),
-                    {-1, fail}
-            end
-         end, Tasks),
-
-    {ReceivedTasks, ReceivedNodes} = lists:unzip(Received),
-
-    %% Ensure all tasks were completed.
-    ?assertEqual(lists:usort(ReceivedTasks), Tasks),
-
-    %% Ensure we used all compute nodes.
-    ?assertEqual(lists:usort(ReceivedNodes), lists:usort(Nodes)),
-
-    ok.
-
-%% Sort nodes according to the number of workers they have, in ascending order
-sort_nodes(Running, Nodes) ->
-    AccFun = fun ({Pid, _MFA}, Acc) ->
-                 Node = node(Pid),
-                 Sum = proplists:get_value(Node, Acc, 0),
-                 lists:keystore(Node, 1, Acc, {Node, Sum+1})
-             end,
-    Acc = lists:map(fun (Node) -> {Node, 0} end, Nodes),
-    NodeCount = lists:foldl(AccFun, Acc, Running),
-    lists:keysort(2, NodeCount).
-
-
-check_nodes(Running, Nodes, MaxWorkers) ->
-    lists:foreach(
-        fun({_Node, Count}) ->
-            ?assert(Count =< MaxWorkers),
-            ok
-        end,
-        sort_nodes(Running, Nodes)),
-    ok.
 
 
 %%
@@ -214,7 +62,6 @@ execute_tasks() ->
 
     ok.
 
-
 %% Start 10 nodes
 %% Start the scheduler
 %% Run 5000 tasks
@@ -251,7 +98,6 @@ max_workers() ->
 
     ok = meck:unload(gascheduler),
     ok.
-
 
 %% Start 10 nodes
 %% Start the scheduler
@@ -295,7 +141,6 @@ max_retries() ->
     receive_nodedown(Slaves),
 
     ok.
-
 
 %% Start 10 nodes with a separate master that does not execute tasks
 %% Start the scheduler on the master
@@ -358,18 +203,18 @@ all_nodes_down() ->
 
     ok.
 
-
 %% Start 3 nodes
 %% Start the scheduler
 %% The first task that runs on node 1 kills node 1
 %% Ensure this task is scheduled on another node
 node_down() ->
     ok = net_kernel:monitor_nodes(true),
-    NumNodes = 3,
+
+    NumNodes   = 3,
     MaxWorkers = 10,
     MaxRetries = 10,
-    NumTasks = 100,
-    Client = self(),
+    NumTasks   = 100,
+    Client     = self(),
 
     Slaves = setup_slaves(NumNodes - 1),
     Nodes = [_Master, Slave1, Slave2]
@@ -382,7 +227,8 @@ node_down() ->
     Tasks = lists:seq(1, NumTasks),
     ok = lists:foreach(
         fun(_) ->
-            ok = gascheduler:execute(test, {gascheduler_test, kill_if, [Slave1]})
+                ok = gascheduler:execute(test, {gascheduler_test, kill_if,
+                                                [Slave1]})
         end, Tasks),
     receive_nodedown([Slave1]),
 
@@ -407,7 +253,6 @@ node_down() ->
     receive_nodedown([Slave2]),
 
     ok.
-
 
 %% Start 3 nodes
 %% Start the scheduler
@@ -454,7 +299,6 @@ unfinished() ->
     receive_nodedown(Slaves),
 
     ok.
-
 
 %% Start 5 nodes
 %% Start the scheduler
@@ -505,4 +349,139 @@ permanent_failure() ->
     kill_slaves(Slaves),
     receive_nodedown(Slaves),
 
+    ok.
+
+
+%%
+%% Utilities
+%%
+
+get_master() ->
+    master@localhost.
+
+setup() ->
+    _ = os:cmd("epmd -daemon"),
+    {ok, _Master} = net_kernel:start([get_master(), shortnames]),
+    ok.
+
+teardown(_) ->
+    _ = net_kernel:stop(),
+    ok.
+
+setup_slaves(Num) ->
+    setup_slaves(1, Num).
+
+setup_slaves(Begin, End) ->
+    Slaves = [ Slave || {ok, Slave}
+                <- [ slave:start_link(localhost, "slave" ++ integer_to_list(N))
+                     || N <- lists:seq(Begin, End) ] ],
+    ?assertEqual(length(Slaves), End - Begin + 1),
+    Slaves.
+
+kill_slaves(Slaves) ->
+    lists:foreach(fun(Slave) -> ok = slave:stop(Slave) end, Slaves).
+
+receive_nodeatom(Atom, Nodes) ->
+    error_logger:info_msg("waiting for: ~p from ~p", [Atom, Nodes]),
+    Result = lists:foreach(
+        fun(_) ->
+            receive
+                {Atom, Node} ->
+                    case lists:member(Node, Nodes) of
+                        true ->
+                            error_logger:info_msg("received ~p from ~p",
+                                                  [Atom, Node]);
+                        false ->
+                            error_logger:error_msg(
+                              "received ~p from UNKNOWN node ~p", [Atom, Node])
+                    end
+            end
+        end, Nodes),
+    error_logger:info_msg("waiting for ~p SUCCESS", [Atom]),
+    Result.
+
+receive_nodeup(Nodes) ->
+    receive_nodeatom(nodeup, Nodes).
+
+receive_nodedown(Nodes) ->
+    receive_nodeatom(nodedown, Nodes).
+
+sleep_100(Id) ->
+   timer:sleep(100),
+   Id.
+
+sleep_1000(Id) ->
+   timer:sleep(1000),
+   Id.
+
+fail() ->
+    throw(testing_max_retries).
+
+fail_permanently(Id) ->
+    %% Pause execution to fill up tasks on all nodes. If jobs execute too
+    %% quickly they may all be execute on 1 node.
+    timer:sleep(100),
+    throw(gascheduler_permanent_failure),
+    Id.
+
+kill_if(Node) ->
+    %% Allow Node to be full before killing it.
+    timer:sleep(100),
+    case node() of
+        Node -> slave:stop(Node);
+        _ -> ok
+    end.
+
+test_tasks(NumTasks, Nodes) ->
+    Tasks = lists:seq(1, NumTasks),
+    ok = lists:foreach(
+        fun(Id) ->
+            ok = gascheduler:execute(test, {gascheduler_test, sleep_100, [Id]})
+        end, Tasks),
+    Received = lists:map(
+        fun(_) ->
+            receive
+                {test, {ok, Id}, Node, {Mod, Fun, Args}} ->
+                    ?assertEqual(gascheduler_test, Mod),
+                    ?assertEqual(sleep_100, Fun),
+                    ?assertEqual(length(Args), 1),
+                    ?assertEqual(hd(Args), Id),
+                    ?assert(lists:member(Node, Nodes)),
+                    ?assert(lists:member(Id, Tasks)),
+                    {Id, Node};
+                Msg ->
+                    error_logger:error_msg("unexpected message: ~p", [Msg]),
+                    ?assert(false),
+                    {-1, fail}
+            end
+         end, Tasks),
+
+    {ReceivedTasks, ReceivedNodes} = lists:unzip(Received),
+
+    %% Ensure all tasks were completed.
+    ?assertEqual(lists:usort(ReceivedTasks), Tasks),
+
+    %% Ensure we used all compute nodes.
+    ?assertEqual(lists:usort(ReceivedNodes), lists:usort(Nodes)),
+
+    ok.
+
+%% Sort nodes according to the number of workers they have, in ascending order
+sort_nodes(Running, Nodes) ->
+    AccFun = fun ({Pid, _MFA}, Acc) ->
+                 Node = node(Pid),
+                 Sum = proplists:get_value(Node, Acc, 0),
+                 lists:keystore(Node, 1, Acc, {Node, Sum+1})
+             end,
+    Acc = lists:map(fun (Node) -> {Node, 0} end, Nodes),
+    NodeCount = lists:foldl(AccFun, Acc, Running),
+    lists:keysort(2, NodeCount).
+
+check_nodes(Running, Nodes, MaxWorkers) ->
+    lists:foreach(
+        fun({_Node, Count}) ->
+            ?assert(Count =< MaxWorkers),
+            ok
+        end,
+        sort_nodes(Running, Nodes)),
     ok.
