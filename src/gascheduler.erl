@@ -212,7 +212,7 @@ handle_info({'EXIT', Client, Reason}, State = #state{client = Client,
     error_logger:warning_msg("gascheduler: exit ~p from client running=~p,"
                              " pending=~p", [Reason, length(Running),
                                              queue:len(Pending)]),
-    {stop, normal, State};
+    {stop, Reason, State};
 handle_info({'EXIT', _Worker, normal}, State) ->
     {noreply, State};
 handle_info({'EXIT', Worker, Reason}, State = #state{pending = Pending,
