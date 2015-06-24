@@ -206,16 +206,27 @@ handle_info({'EXIT', _Worker, normal}, State) ->
     {noreply, State};
 handle_info({'EXIT', Worker, Reason}, State = #state{pending = Pending,
                                                       running = Running}) ->
-    %% Even though we catch all exceptions this is still required because
-    %% exceptions are not raised when a node becomes unavailable.
-    %% We move the task back to pending at the front of queue.
-    error_logger:warning_msg("gascheduler: exit ~p from ~p running=~p,"
-                             " pending=~p", [Reason, Worker, length(Running),
-                                             queue:len(Pending)]),
-
-    {_, MFA} = lists:keyfind(Worker, 1, Running),
-    {noreply, State#state{pending = queue:in_r(MFA, Pending),
-                          running = remove_worker(Worker, Running)}};
+    case get_running_worker(Worker, Running) of
+        {ok, MFA} ->
+            %% Even though we catch all exceptions this is still required
+            %% because exceptions are not raised when a node becomes
+            %% unavailable. We move the task back to pending at the front of
+            %% queue.
+            error_logger:warning_msg("gascheduler: exit ~p from worker ~p "
+                                     "running=~p, pending=~p",
+                                     [Reason, Worker, length(Running),
+                                      queue:len(Pending)]),
+            {noreply, State#state{pending = queue:in_r(MFA, Pending),
+                                  running = remove_worker(Worker, Running)}};
+        not_found ->
+            %% We received exit form other pid that worker or client and
+            %% for that we are ignoring it
+            error_logger:warning_msg("gascheduler: exit ~p from ~p running=~p,"
+                                     " pending=~p", [Reason, Worker,
+                                                     length(Running),
+                                                     queue:len(Pending)]),
+            {stop, normal, State}
+    end;
 handle_info({nodedown, NodeDown}, State = #state{nodes = Nodes}) ->
     error_logger:warning_msg("gascheduler: removing node ~p because it is down",
                              [NodeDown]),
@@ -246,6 +257,13 @@ code_change(_OldVsn, State, _Extra) ->
 
 
 %%% Internal functions
+get_running_worker(From, RunningWorkers) ->
+    case lists:keyfind(From, 1, RunningWorkers) of
+        {_, MFA} ->
+            {ok, MFA};
+        false ->
+            not_found
+    end.
 
 %% Returns the first free node from Nodes, returns undefined if no node is free
 -spec get_free_node(worker_nodes(), max_workers(), running()) -> node() | undefined.
