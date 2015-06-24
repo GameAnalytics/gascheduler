@@ -13,13 +13,14 @@ gascheduler_test_() ->
      fun setup/0,
      fun teardown/1,
      [
-      {spawn, {timeout, 60, ?_test(execute_tasks())}},
-      {spawn, {timeout, 60, ?_test(max_workers())}},
-      {spawn, {timeout, 10, ?_test(max_retries())}},
-      {spawn, {timeout, 10, ?_test(all_nodes_down())}},
-      {spawn, {timeout, 10, ?_test(node_down())}},
-      {spawn, {timeout, 10, ?_test(unfinished())}},
-      {spawn, {timeout, 10, ?_test(permanent_failure())}}
+      {spawn, {timeout, 60,  ?_test(execute_tasks())}},
+      {spawn, {timeout, 60,  ?_test(max_workers())}},
+      {spawn, {timeout, 60,  ?_test(max_retries())}},
+      {spawn, {timeout, 60,  ?_test(all_nodes_down())}},
+      {spawn, {timeout, 60,  ?_test(node_down())}},
+      {spawn, {timeout, 60,  ?_test(unfinished())}},
+      {spawn, {timeout, 60,  ?_test(permanent_failure())}},
+      {spawn, {timeout, 120, ?_test(exit_handling())}}
     ]}.
 
 
@@ -348,6 +349,35 @@ permanent_failure() ->
     ok = gascheduler:stop(test),
     kill_slaves(Slaves),
     receive_nodedown(Slaves),
+
+    ok.
+
+%% Start one node
+%% Start the scheduler
+%% Send normal exit signal to schduler
+%% Assert that scheduler process is no longer running
+exit_handling() ->
+    ok = net_kernel:monitor_nodes(true),
+
+    Client = self(),
+    Nodes = setup_slaves(1),
+    receive_nodeup(Nodes),
+
+    {ok, SchedulerPid} = gascheduler:start_link(test, Nodes, Client, 1, 1),
+    ok = gascheduler:set_retry_timeout(test, 0),
+
+    gascheduler:add_worker_node(test, hd(Nodes)),
+
+    ok = gascheduler:execute(test, {gascheduler_test, sleep_1000,
+                                                  [hd(Nodes)]}),
+
+    %% send normal exit to gascheduler processe
+    SchedulerPid ! {'EXIT', Client, normal},
+
+    timer:sleep(1000),
+
+    %% make sure previous gascheduler processes it no longer running
+    ?assertNot(is_process_alive(SchedulerPid)),
 
     ok.
 
