@@ -30,19 +30,21 @@
 %% For testing
 -export([pending_to_running/1]).
 
--type worker_nodes() :: [node()].
--type max_workers() :: non_neg_integer().
--type max_retries() :: pos_integer().
--type client() :: pid().
--type pending() :: queue:queue(mfa()).
--type running() :: [{pid(), mfa()}].
+%% Types
+-type worker_nodes()  :: [node()].
+-type max_workers()   :: non_neg_integer().
+-type max_retries()   :: pos_integer().
+-type client()        :: pid().
+-type pending()       :: queue:queue(mfa()).
+-type running()       :: [{pid(), mfa()}].
 -type stats_integer() :: {ticks | pending | running | worker_node_count
                           | max_workers | max_retries, non_neg_integer()}.
--type stats_nodes() :: {worker_nodes, {node(), Running::non_neg_integer()}}.
--type stats() :: [stats_integer() | stats_nodes()].
+-type stats_nodes()   :: {worker_nodes, {node(), Running::non_neg_integer()}}.
+-type stats()         :: [stats_integer() | stats_nodes()].
 
 %% The result of executing a worker which is also passed to the client.
 -type result() :: {ok | error, any()}.
+
 
 -record(state, {%% a set of all nodes that can run workers
                 nodes :: worker_nodes(),
@@ -72,7 +74,6 @@
 
 
 %%% API
-
 -spec start_link(atom(), worker_nodes(), client(), max_workers(), max_retries())
           -> {ok, pid()}.
 start_link(Name, Nodes, Client, MaxWorkers, MaxRetries) ->
@@ -118,22 +119,21 @@ set_max_workers(Name, Workers) ->
 notify_client(Scheduler, Result, Worker, MFA) ->
     gen_server:cast(Scheduler, {Result, Worker, MFA}).
 
+
 %%% gen_server callbacks
 
 init([Nodes, Client, MaxWorkers, MaxRetries]) ->
     process_flag(trap_exit, true),
     ok = net_kernel:monitor_nodes(true),
 
-    AliveNodes = ping_nodes(Nodes),
-
-    {ok, #state{nodes = AliveNodes,
-                client = Client,
-                max_workers = MaxWorkers,
-                max_retries = MaxRetries,
+    {ok, #state{nodes         = ping_nodes(Nodes),
+                client        = Client,
+                max_workers   = MaxWorkers,
+                max_retries   = MaxRetries,
                 retry_timeout = 1000,
-                pending = queue:new(),
-                running = [],
-                ticks = 0}}.
+                pending       = queue:new(),
+                running       = [],
+                ticks         = 0}}.
 
 handle_call({execute, MFA}, _From, State) ->
     {reply, ok, execute_try(MFA, State)};
@@ -204,18 +204,38 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 %% pre: notify_client/3 was called
+handle_info({'EXIT', Client, Reason}, State = #state{client = Client,
+                                                     pending = Pending,
+                                                     running = Running}) ->
+    error_logger:warning_msg("gascheduler: exit ~p from client running=~p,"
+                             " pending=~p", [Reason, length(Running),
+                                             queue:len(Pending)]),
+    {stop, Reason, State};
 handle_info({'EXIT', _Worker, normal}, State) ->
     {noreply, State};
-
-handle_info({'EXIT', Worker, _Reason}, State = #state{pending = Pending,
+handle_info({'EXIT', Worker, Reason}, State = #state{pending = Pending,
                                                       running = Running}) ->
-    %% Even though we catch all exceptions this is still required because
-    %% exceptions are not raised when a node becomes unavailable.
-    %% We move the task back to pending at the front of queue.
-    {_, MFA} = lists:keyfind(Worker, 1, Running),
-    {noreply, State#state{pending = queue:in_r(MFA, Pending),
-                          running = remove_worker(Worker, Running)}};
-
+    case get_running_worker(Worker, Running) of
+        {ok, MFA} ->
+            %% Even though we catch all exceptions this is still required
+            %% because exceptions are not raised when a node becomes
+            %% unavailable. We move the task back to pending at the front of
+            %% queue.
+            error_logger:warning_msg("gascheduler: exit ~p from worker ~p "
+                                     "running=~p, pending=~p",
+                                     [Reason, Worker, length(Running),
+                                      queue:len(Pending)]),
+            {noreply, State#state{pending = queue:in_r(MFA, Pending),
+                                  running = remove_worker(Worker, Running)}};
+        not_found ->
+            %% We received exit form other pid that worker or client and
+            %% for that we are ignoring it
+            error_logger:warning_msg("gascheduler: exit ~p from ~p running=~p,"
+                                     " pending=~p", [Reason, Worker,
+                                                     length(Running),
+                                                     queue:len(Pending)]),
+            {stop, Reason, State}
+    end;
 handle_info({nodedown, NodeDown}, State = #state{nodes = Nodes}) ->
     error_logger:warning_msg("gascheduler: removing node ~p because it is down",
                              [NodeDown]),
@@ -223,11 +243,9 @@ handle_info({nodedown, NodeDown}, State = #state{nodes = Nodes}) ->
     %% from workers. Therefore, we can have a state where there are tasks still
     %% in the running queue but no nodes in the nodes list.
     {noreply, State#state{nodes = lists:delete(NodeDown, Nodes)}};
-
 handle_info(Info, State) ->
     error_logger:warning_msg("gascheduler: unexpected message ~p", [Info]),
     {noreply, State}.
-
 
 terminate(Reason, #state{running = Running, pending = Pending} = _State) ->
     case Reason =:= normal andalso Running =:= [] andalso queue:is_empty(Pending) of
@@ -242,13 +260,19 @@ terminate(Reason, #state{running = Running, pending = Pending} = _State) ->
             ok
     end.
 
-
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 
 
 %%% Internal functions
+get_running_worker(From, RunningWorkers) ->
+    case lists:keyfind(From, 1, RunningWorkers) of
+        {_, MFA} ->
+            {ok, MFA};
+        false ->
+            not_found
+    end.
 
 %% Returns the first free node from Nodes, returns undefined if no node is free
 -spec get_free_node(worker_nodes(), max_workers(), running()) -> node() | undefined.
