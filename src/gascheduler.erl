@@ -236,7 +236,7 @@ handle_info({'EXIT', Worker, Reason}, State = #state{pending = Pending,
                                      " pending=~p", [Reason, Worker,
                                                      length(Running),
                                                      queue:len(Pending)]),
-            {stop, normal, State}
+            {stop, Reason, State}
     end;
 handle_info({nodedown, NodeDown}, State = #state{nodes = Nodes}) ->
     error_logger:warning_msg("gascheduler: removing node ~p because it is down",
