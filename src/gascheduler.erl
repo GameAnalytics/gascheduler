@@ -11,7 +11,9 @@
          add_worker_node/2,
          stats/1,
          unfinished/1,
-         set_retry_timeout/2]).
+         set_retry_timeout/2,
+         set_max_workers/2
+        ]).
 
 %% For workers
 -export([notify_client/4,
@@ -105,6 +107,10 @@ unfinished(Name) ->
 set_retry_timeout(Name, RetryTimeout) ->
     gen_server:call(Name, {set_retry_timeout, RetryTimeout}).
 
+-spec set_max_workers(atom(), non_neg_integer()) -> ok.
+set_max_workers(Name, Workers) ->
+    gen_server:call(Name, {set_max_workers, Workers}).
+
 
 %%% For workers
 
@@ -173,6 +179,9 @@ handle_call(unfinished, _From, State = #state{pending = Pending,
 
 handle_call({set_retry_timeout, Timeout}, _From, State) ->
     {reply, ok, State#state{retry_timeout = Timeout}};
+
+handle_call({set_max_workers, Workers}, _From, State) ->
+    {reply, ok, State#state{max_workers = Workers}};
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
