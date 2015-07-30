@@ -334,7 +334,7 @@ log_permanent_failure(Type, Error, MFA) ->
 
 
 %% Executes MFA MaxRetries times
--spec execute_do(mfa(), non_neg_integer(), non_neg_integer()) -> result().
+-spec execute_do(mfa(), non_neg_integer() | infinity, non_neg_integer()) -> result().
 execute_do(_MFA, 0, _RetryTimeout) ->
     {error, max_retries};
 execute_do(MFA = {Mod, Fun, Args}, infinity, RetryTimeout) ->
