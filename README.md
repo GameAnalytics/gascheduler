@@ -111,6 +111,21 @@ then reschedule the task on another available node. However, the task may
 continue running on the node which has lost communication. Therefore, the
 callback has to be safe if it is run more than once.
 
+Do we actually use this code?
+-----------------------------
+
+The gascheduler code is in production use at Game Analytics. We definitely find
+it useful.
+
+Slides
+------
+
+You can find slides about gascheduler
+[here](http://www.slideshare.net/cmmdevries/erlang-meetup-gascheduler).
+This was presented at the
+[Erloung Berlin Erlang Meetup](http://www.meetup.com/erlounge-berlin/).
+We open sourced the project at the end of the presentation.
+
 License
 -------
 
