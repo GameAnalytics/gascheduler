@@ -203,7 +203,10 @@ handle_cast(tick, State = #state{ticks = Ticks, pending = Pending}) ->
 
 handle_cast({Result, Worker, MFA}, State = #state{running = Running,
                                                   client = Client}) ->
-    {registered_name, Name} = process_info(self(), registered_name),
+    Name = case process_info(self(), registered_name) of
+               {registered_name, N} -> N;
+               _                    -> self() %% no name, just use pid
+           end,
     Client ! {Name, Result, node(Worker), MFA},
     {noreply, State#state{running = remove_worker(Worker, Running)}};
 
