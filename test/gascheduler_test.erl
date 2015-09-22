@@ -20,7 +20,8 @@ gascheduler_test_() ->
       {spawn, {timeout, 60,  ?_test(node_down())}},
       {spawn, {timeout, 60,  ?_test(unfinished())}},
       {spawn, {timeout, 60,  ?_test(permanent_failure())}},
-      {spawn, {timeout, 120, ?_test(exit_handling())}}
+      {spawn, {timeout, 120, ?_test(exit_handling())}},
+      {spawn, ?_test(unnamed_scheduler())}
     ]}.
 
 
@@ -378,6 +379,22 @@ exit_handling() ->
 
     %% make sure previous gascheduler processes it no longer running
     ?assertNot(is_process_alive(SchedulerPid)),
+
+    ok.
+
+%% Start a scheduler with no name
+%% Assert no name is registered for the pid of the scheduler
+unnamed_scheduler() ->
+    Client = self(),
+    Nodes = [node()],
+
+    {ok, Pid} = gascheduler:start_link(Nodes, Client, 1, 1),
+
+    %% See erlang:process_info/2 on why we get a list when there is no name
+    %% registered.
+    ?assertEqual([], process_info(Pid, registered_name)),
+
+    ok = gascheduler:stop(Pid),
 
     ok.
 

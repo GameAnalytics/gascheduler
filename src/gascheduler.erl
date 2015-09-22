@@ -6,6 +6,7 @@
 
 %% API
 -export([start_link/5,
+         start_link/4,
          stop/1,
          execute/2,
          add_worker_node/2,
@@ -78,6 +79,12 @@
           -> {ok, pid()}.
 start_link(Name, Nodes, Client, MaxWorkers, MaxRetries) ->
     gen_server:start_link({local, Name}, ?MODULE,
+                           [Nodes, Client, MaxWorkers, MaxRetries], []).
+
+-spec start_link(worker_nodes(), client(), max_workers(), max_retries())
+          -> {ok, pid()}.
+start_link(Nodes, Client, MaxWorkers, MaxRetries) ->
+    gen_server:start_link(?MODULE,
                            [Nodes, Client, MaxWorkers, MaxRetries], []).
 
 -spec stop(atom()) -> ok.
