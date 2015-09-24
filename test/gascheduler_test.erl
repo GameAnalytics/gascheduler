@@ -20,7 +20,8 @@ gascheduler_test_() ->
       {spawn, {timeout, 60,  ?_test(node_down())}},
       {spawn, {timeout, 60,  ?_test(unfinished())}},
       {spawn, {timeout, 60,  ?_test(permanent_failure())}},
-      {spawn, {timeout, 120, ?_test(exit_handling())}}
+      {spawn, {timeout, 120, ?_test(exit_handling())}},
+      {spawn, ?_test(unnamed_scheduler())}
     ]}.
 
 
@@ -381,6 +382,26 @@ exit_handling() ->
 
     ok.
 
+%% Start a scheduler with no name
+%% Assert no name is registered for the pid of the scheduler
+%% Execute a task through the scheduler
+%% assert that work is finished
+unnamed_scheduler() ->
+    Client = self(),
+    Nodes = [node()],
+
+    {ok, Pid} = gascheduler:start_link(Nodes, Client, 1, 1),
+
+    %% See erlang:process_info/2 on why we get a list when there is no name
+    %% registered.
+    ?assertEqual([], process_info(Pid, registered_name)),
+
+    ok = test_tasks(Pid, 1, Nodes),
+
+    ok = gascheduler:stop(Pid),
+
+    ok.
+
 
 %%
 %% Utilities
@@ -463,15 +484,18 @@ kill_if(Node) ->
     end.
 
 test_tasks(NumTasks, Nodes) ->
+    test_tasks(test, NumTasks, Nodes).
+
+test_tasks(Scheduler, NumTasks, Nodes) ->
     Tasks = lists:seq(1, NumTasks),
     ok = lists:foreach(
         fun(Id) ->
-            ok = gascheduler:execute(test, {gascheduler_test, sleep_100, [Id]})
+            ok = gascheduler:execute(Scheduler, {gascheduler_test, sleep_100, [Id]})
         end, Tasks),
     Received = lists:map(
         fun(_) ->
             receive
-                {test, {ok, Id}, Node, {Mod, Fun, Args}} ->
+                {Scheduler, {ok, Id}, Node, {Mod, Fun, Args}} ->
                     ?assertEqual(gascheduler_test, Mod),
                     ?assertEqual(sleep_100, Fun),
                     ?assertEqual(length(Args), 1),

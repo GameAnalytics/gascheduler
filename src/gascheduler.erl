@@ -6,6 +6,7 @@
 
 %% API
 -export([start_link/5,
+         start_link/4,
          stop/1,
          execute/2,
          add_worker_node/2,
@@ -78,6 +79,12 @@
           -> {ok, pid()}.
 start_link(Name, Nodes, Client, MaxWorkers, MaxRetries) ->
     gen_server:start_link({local, Name}, ?MODULE,
+                           [Nodes, Client, MaxWorkers, MaxRetries], []).
+
+-spec start_link(worker_nodes(), client(), max_workers(), max_retries())
+          -> {ok, pid()}.
+start_link(Nodes, Client, MaxWorkers, MaxRetries) ->
+    gen_server:start_link(?MODULE,
                            [Nodes, Client, MaxWorkers, MaxRetries], []).
 
 -spec stop(atom()) -> ok.
@@ -196,7 +203,10 @@ handle_cast(tick, State = #state{ticks = Ticks, pending = Pending}) ->
 
 handle_cast({Result, Worker, MFA}, State = #state{running = Running,
                                                   client = Client}) ->
-    {registered_name, Name} = process_info(self(), registered_name),
+    Name = case process_info(self(), registered_name) of
+               {registered_name, N} -> N;
+               _                    -> self() %% no name, just use pid
+           end,
     Client ! {Name, Result, node(Worker), MFA},
     {noreply, State#state{running = remove_worker(Worker, Running)}};
 
