@@ -13,7 +13,8 @@
          stats/1,
          unfinished/1,
          set_retry_timeout/2,
-         set_max_workers/2
+         set_max_workers/2,
+         get_max_workers/1 
         ]).
 
 %% For workers
@@ -119,6 +120,11 @@ set_retry_timeout(Name, RetryTimeout) ->
 set_max_workers(Name, Workers) ->
     gen_server:call(Name, {set_max_workers, Workers}).
 
+-spec get_max_workers(atom()) -> non_neg_integer().
+get_max_workers(Name) ->
+    gen_server:call(Name, get_max_workers).
+    
+
 
 %%% For workers
 
@@ -189,6 +195,9 @@ handle_call({set_retry_timeout, Timeout}, _From, State) ->
 
 handle_call({set_max_workers, Workers}, _From, State) ->
     {reply, ok, State#state{max_workers = Workers}};
+
+handle_call(get_max_workers, _From, State) ->
+    {reply, ok, State#state.max_workers};
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
