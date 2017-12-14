@@ -35,7 +35,7 @@
 %% Types
 -type worker_nodes()  :: [node()].
 -type max_workers()   :: non_neg_integer().
--type max_retries()   :: pos_integer().
+-type max_retries()   :: pos_integer() | infinity.
 -type client()        :: pid().
 -type pending()       :: queue:queue(mfa()).
 -type running()       :: [{pid(), mfa()}].
@@ -92,7 +92,7 @@ start_link(Nodes, Client, MaxWorkers, MaxRetries) ->
 stop(Name) ->
     gen_server:call(Name, stop).
 
--spec execute(atom(), mfa()) -> ok.
+-spec execute(atom(), {module(), atom(), [term()]}) -> ok.
 execute(Name, MFA) ->
     gen_server:call(Name, {execute, MFA}).
 
@@ -353,7 +353,7 @@ log_permanent_failure(Type, Error, MFA) ->
 
 
 %% Executes MFA MaxRetries times
--spec execute_do(mfa(), non_neg_integer() | infinity, non_neg_integer()) -> result().
+-spec execute_do(mfa(), max_retries(), non_neg_integer()) -> result().
 execute_do(_MFA, 0, _RetryTimeout) ->
     {error, max_retries};
 execute_do(MFA = {Mod, Fun, Args}, infinity, RetryTimeout) ->
