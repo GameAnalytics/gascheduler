@@ -14,7 +14,7 @@
          unfinished/1,
          set_retry_timeout/2,
          set_max_workers/2,
-         get_max_workers/1 
+         get_max_workers/1
         ]).
 
 %% For workers
@@ -123,8 +123,6 @@ set_max_workers(Name, Workers) ->
 -spec get_max_workers(atom()) -> non_neg_integer().
 get_max_workers(Name) ->
     gen_server:call(Name, get_max_workers).
-    
-
 
 %%% For workers
 
@@ -139,14 +137,19 @@ init([Nodes, Client, MaxWorkers, MaxRetries]) ->
     process_flag(trap_exit, true),
     ok = net_kernel:monitor_nodes(true),
 
-    {ok, #state{nodes         = ping_nodes(Nodes),
-                client        = Client,
-                max_workers   = MaxWorkers,
-                max_retries   = MaxRetries,
-                retry_timeout = 1000,
-                pending       = queue:new(),
-                running       = [],
-                ticks         = 0}}.
+    case ping_nodes(Nodes) of
+        [] ->
+            erlang:error(no_nodes_in_cluster);
+        Nodes ->
+            {ok, #state{nodes         = Nodes,
+                        client        = Client,
+                        max_workers   = MaxWorkers,
+                        max_retries   = MaxRetries,
+                        retry_timeout = 1000,
+                        pending       = queue:new(),
+                        running       = [],
+                        ticks         = 0}}
+    end.
 
 handle_call({execute, MFA}, _From, State) ->
     {reply, ok, execute_try(MFA, State)};
@@ -197,7 +200,7 @@ handle_call({set_max_workers, Workers}, _From, State) ->
     {reply, ok, State#state{max_workers = Workers}};
 
 handle_call(get_max_workers, _From, State) ->
-    {reply, ok, State#state.max_workers};
+    {reply, {ok, State#state.max_workers}, State};
 
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
