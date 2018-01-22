@@ -120,7 +120,7 @@ set_retry_timeout(Name, RetryTimeout) ->
 set_max_workers(Name, Workers) ->
     gen_server:call(Name, {set_max_workers, Workers}).
 
--spec get_max_workers(atom()) -> non_neg_integer().
+-spec get_max_workers(atom()) -> {ok, non_neg_integer()}.
 get_max_workers(Name) ->
     gen_server:call(Name, get_max_workers).
 
