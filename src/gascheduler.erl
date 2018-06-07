@@ -265,6 +265,14 @@ handle_info({nodedown, NodeDown}, State = #state{nodes = Nodes}) ->
     %% from workers. Therefore, we can have a state where there are tasks still
     %% in the running queue but no nodes in the nodes list.
     {noreply, State#state{nodes = lists:delete(NodeDown, Nodes)}};
+handle_info({nodeup, Node}, State = #state{nodes = Nodes}) ->
+    NewNodes = case lists:member(Node, Nodes) of
+                   true -> Nodes;
+                   false -> [Node | Nodes]
+               end,
+    error_logger:warning_msg("gascheduler: adding node ~p back to scheduler",
+                             [Node]),
+    {noreply, State#state{nodes = NewNodes}};
 handle_info(Info, State) ->
     error_logger:warning_msg("gascheduler: unexpected message ~p", [Info]),
     {noreply, State}.
