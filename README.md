@@ -1,6 +1,8 @@
 GameAnalytics Cluster Scheduler
 -------------------------------
 
+[![Build Status](https://travis-ci.org/GameAnalytics/gascheduler.svg?branch=master)](https://travis-ci.org/GameAnalytics/gascheduler)
+
 This library implements a generic scheduler for processing tasks in a cluster.
 The generation and processing of tasks is specialized for a particular
 application. The client passes a callback to execute and a message is returned
